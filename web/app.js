@@ -27,7 +27,10 @@
   const DEFAULTS = {
     locale: "en-CA",
     weather: { city: "", country_code: "", units: "metric", refresh_minutes: 15 },
-    night: { start: "22:00", end: "07:00", color: "#8f5cff", dim: 0.45, brightness: 0.03 },
+    night: {
+      by: "time", start: "22:00", end: "07:00",   // by: "time" = these hours, "dark" = when the room is dark
+      dark_lux: 5, color: "#8f5cff", dim: 0.45, brightness: 0.03,
+    },
     day: { brightness: -1, color: "#ffffff" },   // brightness -1 = leave the backlight to Android
     views: { camera_timeout_minutes: 10, weather_timeout_minutes: 0, buttons_hide_seconds: 6 },
     alarm: {
@@ -82,6 +85,7 @@
     openSystemSettings: () => window.Android.openSystemSettings(),
     listSlides: async () => JSON.parse(window.Android.listSlides()),
     remoteAddress: () => window.Android.remoteAddress(),
+    lux: () => window.Android.lux(),   // room light from the tablet's sensor; below 0 = no sensor
   } : REMOTE ? {
     getConfig: () => fetch("/api/config").then((r) => r.text()),
     saveConfig: (json) => fetch("/api/config", { method: "POST", body: json }),
@@ -222,7 +226,25 @@
 
   function isNight(now) {
     if (params.has("night")) return params.get("night") === "1";   // ?night=1 previews it
-    return inSpan(cfg.night.start, cfg.night.end, now);
+    const dark = cfg.night.by === "dark" ? roomIsDark() : null;
+    return dark === null ? inSpan(cfg.night.start, cfg.night.end, now) : dark;
+  }
+
+  // Night mode by room light. The reading must stay across the limit for a few
+  // seconds (a passing shadow does nothing), and it takes twice the limit to
+  // leave night mode, so the screen's own glow cannot make it flip back and forth.
+  const DARK_SETTLE_MS = 5000;
+  let dark = false;
+  let darkFlipAt = 0;
+
+  function roomIsDark() {
+    const lux = native.lux ? native.lux() : -1;
+    if (lux < 0) return null;   // no sensor here: the caller falls back to the hours
+    const wanted = lux < cfg.night.dark_lux * (dark ? 2 : 1);
+    if (wanted === dark) darkFlipAt = 0;
+    else if (!darkFlipAt) darkFlipAt = Date.now();
+    else if (Date.now() - darkFlipAt > DARK_SETTLE_MS) { dark = wanted; darkFlipAt = 0; }
+    return dark;
   }
 
   // Is `now` between two "HH:MM" times? The span may run past midnight.
@@ -891,16 +913,19 @@
   // --- settings (one tab per subject) ------------------------------------------
   const STREAMS = [["0", "Main stream"], ["1", "Sub stream 1"], ["2", "Sub stream 2"]];
   const DAYS = [["all", "Every day"], ["weekdays", "Mon\u2013Fri"], ["weekend", "Sat\u2013Sun"]];
-  const percent = { show: (v) => (v < 0 ? "" : Math.round(v * 100)), read: (s) => (s === "" ? -1 : Math.min(100, Math.max(1, +s)) / 100) };
+  const percent = { show: (v) => (v < 0 ? "" : Math.round(v * 100)), read: (s) => (s === "" ? -1 : Math.min(100, Math.max(0, +s)) / 100) };
   const number = { show: (v) => v, read: (s) => Math.max(0, +s || 0) };
   // Tabs of [setting, label, kind, conversion]; kind is an input type or a list of choices.
   const SETTINGS = [
     ["General", [
       ["locale", "Date language", [["en-CA", "English"], ["fr-CA", "Fran\u00E7ais"], ["ru-RU", "\u0420\u0443\u0441\u0441\u043A\u0438\u0439"]]],
       ["views.buttons_hide_seconds", "Hide the buttons after, s", "number", number],
+      ["night.by", "Night mode", [["time", "By the clock"], ["dark", "When the room is dark"]]],
+      ["night.dark_lux", "Dark means below, lux", "number", number],
       ["night.start", "Night mode from", "time"],
       ["night.end", "Night mode until", "time"],
-      ["night.brightness", "Night backlight, %", "number", percent],
+      ["night.brightness", "Night backlight, % (0 = the lowest the screen can do)", "number", percent],
+      ["night.dim", "Night text strength, %", "number", percent],
       ["day.brightness", "Day backlight, % (empty = automatic)", "number", percent],
       ["night.color", "Night colour", "color"],
       ["day.color", "Day colour", "color"],
@@ -1008,6 +1033,12 @@
     $("settings-remote").textContent = address ? "Remote control from a PC or phone on this Wi-Fi: " + address : "";
   }
 
+  // Helps to choose the "dark" limit: the sensor's reading, live, on the General tab.
+  function showRoomLight() {
+    const lux = view === "settings" && settingsTab === 0 && native.lux ? native.lux() : -1;
+    $("settings-light").textContent = lux < 0 ? "" : "Room light now: " + Math.round(lux) + " lux";
+  }
+
   async function saveSettings() {
     const next = JSON.parse(JSON.stringify(cfg));
     $("settings-form").querySelectorAll("[data-path]").forEach((input) => {
@@ -1045,7 +1076,7 @@
     const root = document.documentElement.style;
     root.setProperty("--night", cfg.night.color);
     root.setProperty("--day", cfg.day.color);
-    root.setProperty("--night-dim", cfg.night.dim);
+    root.setProperty("--night-dim", cfg.night.dim > 0 ? cfg.night.dim : 1);   // never invisible
     native.configure(JSON.stringify(cfg));   // the native side starts listening to the cameras
     if (view === "settings") fillSettings();
     buildCameras();
@@ -1064,6 +1095,7 @@
     alarmTick();
     checkClockAlarms();
     checkSlideSchedule();
+    showRoomLight();
     checkIdle();
     renderStatus();
   }, 500);

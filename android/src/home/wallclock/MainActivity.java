@@ -4,6 +4,10 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.View;
@@ -40,6 +44,18 @@ public class MainActivity extends Activity {
     private WebView web;
     private Cameras cameras;
     private Remote remote;
+    private volatile float lux = -1f;   // room light from the sensor; below 0 = not known
+
+    private final SensorEventListener light = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent reading) {
+            lux = reading.values[0];
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        }
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -67,6 +83,20 @@ public class MainActivity extends Activity {
 
         remote = new Remote(getAssets(), new RemoteHost());
         remote.start();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        SensorManager sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
+        Sensor sensor = sensors.getDefaultSensor(Sensor.TYPE_LIGHT);
+        if (sensor != null) sensors.registerListener(light, sensor, SensorManager.SENSOR_DELAY_NORMAL);
+    }
+
+    @Override
+    protected void onPause() {
+        ((SensorManager) getSystemService(SENSOR_SERVICE)).unregisterListener(light);
+        super.onPause();
     }
 
     @Override
@@ -175,9 +205,15 @@ public class MainActivity extends Activity {
                 WindowManager.LayoutParams window = getWindow().getAttributes();
                 window.screenBrightness = level < 0
                         ? WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                        : Math.max(0.01f, Math.min(1f, level));
+                        : Math.max(0f, Math.min(1f, level));   // 0 = the panel's minimum, not off
                 getWindow().setAttributes(window);
             });
+        }
+
+        /** Room light in lux, or below 0 when the tablet has no light sensor. */
+        @JavascriptInterface
+        public float lux() {
+            return lux;
         }
 
         /** File names of the slideshow pictures, as a JSON list. */
