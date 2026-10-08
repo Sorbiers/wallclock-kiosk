@@ -3,6 +3,7 @@ REM Pretend a camera alarm on the tablet (pictures and live view are real).
 REM Usage: test-alarm.bat [camera] [tablet address]     camera: 1 or 2
 REM Started without a camera number, it asks for one.
 cd /d "%~dp0"
+if exist "%~dp0local.bat" call "%~dp0local.bat"
 
 set "CAM=%~1"
 if "%CAM%"=="" set /p "CAM=Camera (1 or 2) [1]: "

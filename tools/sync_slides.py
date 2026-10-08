@@ -17,7 +17,7 @@ from PIL import Image, ImageOps
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "slides"
 SHRUNK = ROOT / "dist" / "slides"
-ADB = Path(os.environ.get("ANDROID_SDK_ROOT", "F:/AndroidSdk")) / "platform-tools" / "adb.exe"
+ADB = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or Path.home() / "AppData/Local/Android/Sdk") / "platform-tools" / "adb.exe"
 ON_TABLET = "/sdcard/Android/data/home.wallclock/files"   # the app's own folder; "slides" goes inside
 PICTURES = (".jpg", ".jpeg", ".png", ".webp")
 FIT = (1920, 1200)   # plenty for the 1340x800 screen, with room for the slow zoom

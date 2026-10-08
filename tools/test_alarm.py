@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REMEMBERED = ROOT / "tablet.local.txt"
-ADB = Path(os.environ.get("ANDROID_SDK_ROOT", "F:/AndroidSdk")) / "platform-tools" / "adb.exe"
+ADB = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or Path.home() / "AppData/Local/Android/Sdk") / "platform-tools" / "adb.exe"
 PORT = 8080
 
 

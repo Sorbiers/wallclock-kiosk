@@ -2,9 +2,10 @@
 REM Install dist\wallclock.apk on the tablet over USB and start it.
 REM Settings on the tablet are kept. Needs USB debugging on and the tablet plugged in.
 cd /d "%~dp0"
+if exist "%~dp0local.bat" call "%~dp0local.bat"
 
 set "SDK=%ANDROID_SDK_ROOT%"
-if "%SDK%"=="" set "SDK=F:\AndroidSdk"
+if "%SDK%"=="" set "SDK=%LOCALAPPDATA%\Android\Sdk"
 set "ADB=%SDK%\platform-tools\adb.exe"
 
 if not exist dist\wallclock.apk (

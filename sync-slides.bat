@@ -4,6 +4,7 @@ REM Put pictures in the slides\ folder next to this file, then run this.
 REM New pictures are added, deleted ones are removed from the tablet too.
 REM Usage: sync-slides.bat [folder]      (default: slides\)
 cd /d "%~dp0"
+if exist "%~dp0local.bat" call "%~dp0local.bat"
 
 python tools\sync_slides.py %*
 

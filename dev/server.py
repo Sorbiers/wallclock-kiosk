@@ -6,7 +6,8 @@
 On the tablet the app's Java code serves the page, relays each camera's alarm
 stream, proxies snapshots (they need a login a web page cannot give) and keeps
 the settings. This script does the same four things on the PC. The camera
-login is borrowed from Butler's .env; settings saved from the page are kept in
+login comes from dev/cameras.env (see dev/cameras.example.env; or point
+WALLCLOCK_ENV at another file); settings saved from the page are kept in
 memory only. The tablet never uses this.
 """
 
@@ -14,6 +15,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import os
 import re
 import sys
 import webbrowser
@@ -26,7 +28,7 @@ from dotenv import dotenv_values
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
 SLIDES_DIR = ROOT / "slides"   # the PC copy of the slideshow pictures
-BUTLER_ENV = "F:/Butler/.env"
+ENV_FILE = Path(os.environ.get("WALLCLOCK_ENV") or ROOT / "dev" / "cameras.env")
 PORT = next((int(arg) for arg in sys.argv[1:] if arg.isdigit()), 8080)
 
 logger = logging.getLogger("dev")
@@ -38,7 +40,7 @@ _HEARTBEAT = 5
 
 class Dev:
     def __init__(self):
-        env = dotenv_values(BUTLER_ENV)
+        env = dotenv_values(ENV_FILE)
         self.user, self.password = env.get("CAM_USER", ""), env.get("CAM_PASS", "")
         self.hosts = [env.get("CAM_HOST", "cam.local"), env.get("CAM_REAR_HOST", "rcam.local")]
         self.saved = None      # settings saved from the page (this run only)

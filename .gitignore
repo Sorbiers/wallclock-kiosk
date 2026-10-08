@@ -10,6 +10,8 @@ android/*.keystore
 # Personal: this home's addresses, own pictures, screenshots of the cameras
 web/local.js
 tablet.local.txt
+local.bat
+dev/cameras.env
 slides/
 docs/
 

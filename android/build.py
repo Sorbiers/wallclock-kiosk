@@ -3,7 +3,7 @@
 Uses Google's SDK tools directly (no Gradle): aapt2 packs the manifest, the
 icon and the page (web/ becomes the app's assets), javac and d8 compile the
 Java code, zipalign and apksigner finish the APK. Needs a JDK on PATH and the
-Android SDK (set ANDROID_SDK_ROOT if it is not in F:/AndroidSdk).
+Android SDK (set ANDROID_SDK_ROOT if it is not in the default place).
 """
 
 import os
@@ -18,7 +18,9 @@ APP = ROOT / "android"
 BUILD = APP / "build"
 OUT = ROOT / "dist" / "wallclock.apk"
 
-SDK = Path(os.environ.get("ANDROID_SDK_ROOT", "F:/AndroidSdk"))
+SDK = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or Path.home() / "AppData/Local/Android/Sdk")
+if not (SDK / "build-tools").is_dir():
+    sys.exit(f"Android SDK not found in {SDK}: set ANDROID_SDK_ROOT (see local.example.bat)")
 TOOLS = sorted((SDK / "build-tools").iterdir())[-1]
 PLATFORM = sorted((SDK / "platforms").iterdir(), key=lambda p: int(p.name.split("-")[1]))[-1] / "android.jar"
 
