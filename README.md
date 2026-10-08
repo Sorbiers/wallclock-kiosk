@@ -49,6 +49,7 @@ platform, platform-tools).
 | `build.bat` | Builds `dist\wallclock.apk` |
 | `deploy.bat` | Installs it on the tablet over USB and starts it (tablet settings are kept) |
 | `sync-slides.bat [folder]` | Copies the slideshow pictures (default: `slides\`) to the tablet, shrunk to tablet size; removes ones you deleted |
+| `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet (camera 1 or 2); pictures and live view are real |
 | `serve.bat [port]` | Shows the page on this PC for debugging; camera login is borrowed from Butler's `.env` |
 
 After editing files in `web\`: refresh the browser to see it on the PC, then

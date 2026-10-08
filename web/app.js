@@ -109,10 +109,42 @@
   function command(what) {
     return fetch("/api/command", { method: "POST", body: JSON.stringify(what) });
   }
+  // Colour pickers on the remote page: each change is shown on the tablet at
+  // once, in the mode the colour belongs to (so a night colour can be judged by
+  // day). It lasts until Save, or a few seconds after the last change.
+  const PREVIEW_MS = 10000;
+  const COLOURS = { "night.color": "--night", "day.color": "--day" };
+  let previewMode = null;
+  let previewEnd = null;
+  let previewSend = null;
+  let previewSentAt = 0;
+
+  function sendPreview(path, value) {   // remote side; at most five a second while dragging
+    clearTimeout(previewSend);
+    const send = () => { previewSentAt = Date.now(); command({ preview: { path: path, value: value } }); };
+    if (Date.now() - previewSentAt > 200) send(); else previewSend = setTimeout(send, 200);
+  }
+
+  function preview(change) {            // tablet side
+    if (!COLOURS[change.path] || !/^#[0-9a-f]{6}$/i.test(change.value)) return;
+    const root = document.documentElement.style;
+    root.setProperty(COLOURS[change.path], change.value);
+    previewMode = change.path === "night.color" ? "night" : "day";
+    clearTimeout(previewEnd);
+    previewEnd = setTimeout(() => {
+      previewMode = null;
+      root.setProperty("--night", cfg.night.color);
+      root.setProperty("--day", cfg.day.color);
+      updateMode();
+    }, PREVIEW_MS);
+    updateMode();
+  }
+
   function onRemote(what) {
     if (what.view && VIEWS.includes(what.view)) show(what.view);
-    if (what.test) testAlarm();
+    if (what.test) testAlarm(what.cam);
     if (what.ring) ring(what.ring);
+    if (what.preview) preview(what.preview);
     if (what.stop) {
       if (ringing) stopRinging(0);
       if (alarm.open) closeAlarm(true);
@@ -259,7 +291,7 @@
   // screen is being used: settings, an alarm, or the seconds after a tap.
   function updateMode() {
     const inUse = view === "settings" || alarm.open || ringing || Date.now() - lastTouch < DAY_PEEK_MS;
-    night = isNight(new Date()) && !inUse;
+    night = previewMode ? previewMode === "night" : isNight(new Date()) && !inUse;
     document.body.classList.toggle("night", night);
     const slideLight = night ? cfg.slides.brightness_night : cfg.slides.brightness_day;   // the slideshow's own backlight
     const level = view === "slides" && !ss.interlude && !ss.fading && slideLight >= 0 ? slideLight
@@ -1043,6 +1075,7 @@
         if (kind === "checkbox") input.checked = !!value;
         else input.value = convert ? convert.show(value) : value == null ? "" : value;
         input.dataset.path = path;
+        if (REMOTE && kind === "color") input.addEventListener("input", () => sendPreview(path, input.value));
         if (REMOTE && kind === "password") input.placeholder = "unchanged";   // the tablet never sends it out
         row.append(el("span", "", field[1]), input);
         box.appendChild(row);
@@ -1082,9 +1115,11 @@
   $("settings-save").addEventListener("click", saveSettings);
   $("settings-system").hidden = !native.openSystemSettings;
   $("settings-system").addEventListener("click", () => native.openSystemSettings());
-  function testAlarm() {
+  function testAlarm(cam) {   // cam: position of the camera to pretend about; the first one if not given
     show("clock");
-    onCameraEvent({ cam: cfg.cameras.findIndex((cam) => cam.host), code: TEST_CODE, action: "Pulse", index: 0 });
+    const first = cfg.cameras.findIndex((camera) => camera.host);
+    const chosen = cfg.cameras[cam] && cfg.cameras[cam].host ? cam : first;
+    onCameraEvent({ cam: chosen, code: TEST_CODE, action: "Pulse", index: 0 });
   }
   $("settings-test").addEventListener("click", () => (REMOTE ? command({ test: true }) : testAlarm()));
   // Test the alarm clock with what the form shows now, saved or not.

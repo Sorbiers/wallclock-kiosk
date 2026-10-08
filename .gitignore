@@ -9,6 +9,7 @@ android/*.keystore
 
 # Personal: this home's addresses, own pictures, screenshots of the cameras
 web/local.js
+tablet.local.txt
 slides/
 docs/
 

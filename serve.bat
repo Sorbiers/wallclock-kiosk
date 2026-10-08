@@ -12,4 +12,4 @@ if "%PORT%"=="" set "PORT=8080"
 python dev\server.py %PORT% --open
 
 REM Reached only if the server could not start (e.g. the port is in use).
-echo %cmdcmdline% | find /i "/c" >nul && pause
+echo %cmdcmdline% | "%SystemRoot%\System32\find.exe" /i "/c" >nul && pause

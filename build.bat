@@ -10,4 +10,4 @@ if errorlevel 1 (
 )
 
 REM Keep the window open when started by double-click.
-echo %cmdcmdline% | find /i "/c" >nul && pause
+echo %cmdcmdline% | "%SystemRoot%\System32\find.exe" /i "/c" >nul && pause
