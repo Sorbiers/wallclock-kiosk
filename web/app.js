@@ -315,13 +315,15 @@
 
   // Night mode (dim violet, low backlight) gives way to day mode whenever the
   // screen is being used: settings, an alarm, or the seconds after a tap.
+  // The backlight, by priority: the slideshow's own setting, then full light
+  // while in use, then the night level or the room light.
   function updateMode() {
     const inUse = view === "settings" || alarm.open || ringing || Date.now() - lastTouch < DAY_PEEK_MS;
     night = previewMode ? previewMode === "night" : isNight(new Date()) && !inUse;
     document.body.classList.toggle("night", night);
     const slideLight = night ? cfg.slides.brightness_night : cfg.slides.brightness_day;   // the slideshow's own backlight
     const level = view === "slides" && !ss.interlude && !ss.fading && slideLight >= 0 ? slideLight
-      : night ? cfg.night.brightness : dayLight();
+      : night ? cfg.night.brightness : dayLight(inUse);
     if (level === lastBrightness) return;
     lastBrightness = level;
     native.setBrightness(level);
@@ -332,12 +334,13 @@
   // Android's own adaptive brightness is flat over the lower range on some
   // tablets, which is why the app can do this itself.
   let calmLux = -1;
-  function dayLight() {
+  function dayLight(inUse) {
     const auto = cfg.day.auto;
     const lux = auto.on && native.lux ? native.lux() : -1;
     if (lux < 0) return cfg.day.brightness;   // switched off, or no sensor
-    calmLux = calmLux < 0 ? lux : calmLux + (lux - calmLux) * 0.25;   // smooth out the sensor's jitter
     const low = Math.max(0, auto.min), high = Math.max(low, auto.max);
+    if (inUse) return high;   // someone is at the screen: full light, however dark the room
+    calmLux = calmLux < 0 ? lux : calmLux + (lux - calmLux) * 0.25;   // smooth out the sensor's jitter
     const share = Math.min(1, Math.log(1 + calmLux) / Math.log(1 + Math.max(1, auto.full_lux)));
     return Math.round((low + (high - low) * share) * 100) / 100;   // whole percents: no constant fiddling
   }
@@ -1032,7 +1035,7 @@
       ["day.brightness", "Day backlight when not following the room, % (empty = Android decides)", "number", percent],
       ["day.auto.on", "Day backlight follows the room light", "checkbox"],
       ["day.auto.min", "…in the dark, %", "number", percent],
-      ["day.auto.max", "…at its brightest, %", "number", percent],
+      ["day.auto.max", "…at its brightest and after a tap, %", "number", percent],
       ["day.auto.full_lux", "…brightest from, lux", "number", number],
       ["night.color", "Night colour", "color"],
       ["day.color", "Day colour", "color"],
