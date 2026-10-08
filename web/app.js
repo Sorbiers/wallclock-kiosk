@@ -596,6 +596,36 @@
     renderWeather();
   }
 
+  // Broad kinds of weather; a move from one to another is worth announcing.
+  const CHANGE_HOURS = 12;
+  function kindOf(code) {
+    if (code >= 95) return "storm";
+    if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
+    if (code >= 51) return "rain";
+    return code >= 2 ? "cloud" : "clear";
+  }
+  function observedKind(key) {
+    const k = key.toLowerCase();
+    if (/thunder/.test(k)) return "storm";
+    if (/snow|flurr|ice pellet|hail/.test(k)) return "snow";
+    if (/rain|drizzle|shower|precip/.test(k)) return "rain";
+    return /cloud|overcast|fog|mist|haze|smoke/.test(k) ? "cloud" : "clear";
+  }
+
+  // The first change of kind in the coming hours that lasts at least two hours,
+  // as { emoji, at: "HH:MM" }; null when the weather holds.
+  function comingChange(nowKind, h) {
+    const first = h.time.findIndex((t) => new Date(t).getTime() > Date.now());
+    if (first < 0) return null;
+    for (let i = first; i < Math.min(first + CHANGE_HOURS, h.time.length); i++) {
+      const kind = kindOf(h.weather_code[i]);
+      if (kind === nowKind) continue;
+      if (i + 1 < h.time.length && kindOf(h.weather_code[i + 1]) !== kind) continue;   // a one-hour blip
+      return { emoji: sky(h.weather_code[i], h.is_day[i]).emoji, at: h.time[i].slice(11, 16) };
+    }
+    return null;
+  }
+
   function cell(when, emoji, temps, precip) {
     const node = el("div", "cell");
     node.append(el("div", "when", when), el("div", "emoji", emoji), temps,
@@ -618,8 +648,14 @@
       + " · updated " + hhmm(wx.at);
 
     if (Date.now() - wx.at < WX_STALE_MS) {
-      line.append(el("span", "emoji", s.emoji), el("span", "temp", deg(temp)), el("span", "", s.text),
-        el("span", "range", "↑ " + deg(day.temperature_2m_max[0]) + "  ↓ " + deg(day.temperature_2m_min[0])));
+      const change = comingChange(obs ? observedKind(obs.key) : kindOf(cur.weather_code), d.hourly);
+      line.append(el("span", "emoji", s.emoji), el("span", "temp", deg(temp)));
+      if (change) {   // a change of weather ahead replaces the text and the day's range
+        line.append(el("span", "range", "→"), el("span", "emoji", change.emoji), el("span", "", change.at));
+      } else {
+        line.append(el("span", "", s.text),
+          el("span", "range", "↑ " + deg(day.temperature_2m_max[0]) + "  ↓ " + deg(day.temperature_2m_min[0])));
+      }
     }
 
     const metrics = el("dl", "wx-metrics");
