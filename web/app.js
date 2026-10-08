@@ -745,7 +745,7 @@
   async function record(index, cam, code) {
     const state = stateOf(index), a = cfg.alarm, now = new Date();
     const ev = {
-      id: index + "-" + now.getTime(), name: cam.name, codes: [code], active: true, pictures: [],
+      id: index + "-" + now.getTime(), cam: index, name: cam.name, codes: [code], active: true, pictures: [],
       time: pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds()),
     };
     state.alarm = ev;
@@ -797,10 +797,38 @@
     const pic = alarm.pics[alarm.idx];
     const ev = pic ? pic.ev : Array.from(alarm.events).pop();
     if (!ev) return;
+    syncAlarmLive(ev.cam);
     const label = ev.codes.map((code) => EVENT_LABELS[code] || code).join(" + ");
     $("alarm-caption").textContent = ev.name + " · " + label + " · " + ev.time;
     $("alarm-count").textContent = pic ? (alarm.idx + 1) + " / " + alarm.pics.length : "";
   }
+
+  // Upright tablet: the alarmed camera plays live under the pictures.
+  let alarmLive = null;   // { cam, stream, retry } while it plays
+
+  function syncAlarmLive(wanted) {
+    const cam = alarm.open && upright.matches ? wanted : -1;
+    if (alarmLive && alarmLive.cam === cam) return;
+    if (alarmLive) {
+      clearTimeout(alarmLive.retry);
+      if (alarmLive.stream) alarmLive.stream.stop();
+      alarmLive = null;
+    }
+    $("alarm").classList.toggle("with-live", cam >= 0);
+    $("alarm-live-box").hidden = cam < 0;
+    if (cam < 0) return;
+    const live = alarmLive = { cam: cam, stream: null, retry: null };
+    const camera = cfg.cameras[cam];
+    const start = () => {
+      live.stream = new window.CameraStream($("alarm-live"), {
+        host: camera.host, user: cfg.camera_user, password: cfg.camera_password, subtype: camera.stream,
+        onState: (state) => { if (state !== "playing" && alarmLive === live) live.retry = setTimeout(start, 4000); },
+      });
+      live.stream.start();
+    };
+    start();
+  }
+  upright.addEventListener("change", () => { if (alarm.open) renderAlarm(); });
 
   function showPicture(i) {
     alarm.idx = i;
@@ -837,6 +865,7 @@
     alarm.pics = [];
     $("alarm").hidden = true;
     $("alarm-img").removeAttribute("src");
+    syncAlarmLive(-1);
     lastTouch = Date.now();
     updateMode();
   }
