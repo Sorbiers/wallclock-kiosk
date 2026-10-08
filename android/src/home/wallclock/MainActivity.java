@@ -3,6 +3,7 @@ package home.wallclock;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -73,7 +74,8 @@ public class MainActivity extends Activity {
         settings.setAllowFileAccess(false);
         settings.setTextZoom(100);             // the page is sized in screen units, not system font size
         settings.setMediaPlaybackRequiresUserGesture(false);   // alarm sounds start by themselves
-        WebView.setWebContentsDebuggingEnabled(true);   // chrome://inspect over USB
+        // chrome://inspect over USB, in debug builds only (build.bat --debug)
+        WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 
         cameras = new Cameras(this::runInPage);
         web.setWebViewClient(new PageClient(getAssets(), cameras, slides()));
@@ -144,24 +146,34 @@ public class MainActivity extends Activity {
 
     /** What the remote-control page (another device's browser) may do. */
     private final class RemoteHost implements Remote.Host {
-        /** The settings, without the camera password: it never leaves the tablet. */
         @Override
-        public String config() {
+        public String pin() {
             try {
-                return new JSONObject(settings().getString("config", "{}")).put("camera_password", "").toString();
+                return new JSONObject(settings().getString("config", "{}")).optString("remote_pin").trim();
             } catch (JSONException unreadable) {
                 return "";
             }
         }
 
-        /** An empty password means "unchanged". Then the page restarts with the new settings. */
+        /** The settings, without the camera password and the PIN: they never leave the tablet. */
+        @Override
+        public String config() {
+            try {
+                return new JSONObject(settings().getString("config", "{}"))
+                        .put("camera_password", "").put("remote_pin", "").toString();
+            } catch (JSONException unreadable) {
+                return "";
+            }
+        }
+
+        /** An empty password or PIN means "unchanged". Then the page restarts with the new settings. */
         @Override
         public void saveConfig(String json) {
             try {
                 JSONObject next = new JSONObject(json);
-                if (next.optString("camera_password").isEmpty()) {
-                    JSONObject current = new JSONObject(settings().getString("config", "{}"));
-                    next.put("camera_password", current.optString("camera_password"));
+                JSONObject current = new JSONObject(settings().getString("config", "{}"));
+                for (String secret : new String[] {"camera_password", "remote_pin"}) {
+                    if (next.optString(secret).isEmpty()) next.put(secret, current.optString(secret));
                 }
                 settings().edit().putString("config", next.toString()).apply();
                 runInPage("location.reload()");

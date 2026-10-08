@@ -1,10 +1,10 @@
 @echo off
-REM Build the Wall Clock app -> dist\wallclock.apk
+REM Build the Wall Clock app -> dist\wallclock.apk      (build.bat --debug: inspectable over USB)
 REM (web\ and android\ are packed by android\build.py; needs a JDK and the Android SDK.)
 cd /d "%~dp0"
 if exist "%~dp0local.bat" call "%~dp0local.bat"
 
-python android\build.py
+python android\build.py %*
 if errorlevel 1 (
     echo.
     echo BUILD FAILED

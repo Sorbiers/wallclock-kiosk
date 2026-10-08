@@ -11,18 +11,23 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * Remote control: a tiny web server on the tablet. Opening http://tablet:8080
  * from a PC or phone on the home network shows the same page in "remote" form
  * (mode buttons and the settings), which talks back through /api/...
  *
- * There is no login: anyone on the Wi-Fi can use it. The camera password is
- * never sent out (see MainActivity's Host).
+ * Everything under /api needs the PIN from the settings (header X-Pin); with
+ * no PIN set the remote control is off. A few wrong PINs lock it for a
+ * minute. Neither the PIN nor the camera password is ever sent out.
  */
 final class Remote extends Thread {
     /** What the server needs from the app. */
     interface Host {
+        /** The PIN that opens the remote control; empty = it is switched off. */
+        String pin();
+
         String config();
 
         void saveConfig(String json);
@@ -33,10 +38,14 @@ final class Remote extends Thread {
     static final int PORT = 8080;
     private static final String TAG = "WallClock";
     private static final int MAX_BODY = 200000;
+    private static final int MAX_TRIES = 5;
+    private static final long LOCK_MS = 60000;
 
     private final AssetManager assets;
     private final Host host;
     private volatile ServerSocket server;
+    private int wrongPins;
+    private long lockedUntil;
 
     Remote(AssetManager assets, Host host) {
         super("remote");
@@ -78,10 +87,11 @@ final class Remote extends Thread {
             if (request == null) return;
             String[] parts = request.split(" ");
             int length = 0;
+            String pin = null;
             for (String header = line(in); header != null && !header.isEmpty(); header = line(in)) {
-                if (header.toLowerCase().startsWith("content-length:")) {
-                    length = Integer.parseInt(header.substring(15).trim());
-                }
+                String lower = header.toLowerCase();
+                if (lower.startsWith("content-length:")) length = Integer.parseInt(header.substring(15).trim());
+                if (lower.startsWith("x-pin:")) pin = header.substring(6).trim();
             }
             byte[] body = new byte[Math.min(length, MAX_BODY)];
             int got = 0;
@@ -91,14 +101,21 @@ final class Remote extends Thread {
                 got += n;
             }
             String path = parts.length > 1 ? parts[1].split("\\?")[0] : "/";
-            answer(socket.getOutputStream(), parts[0], path, new String(body, 0, got, StandardCharsets.UTF_8));
+            answer(socket.getOutputStream(), parts[0], path, pin, new String(body, 0, got, StandardCharsets.UTF_8));
         } catch (IOException | RuntimeException failed) {
             Log.w(TAG, "Remote request failed: " + failed);
         }
     }
 
-    private void answer(OutputStream out, String method, String path, String body) throws IOException {
+    private void answer(OutputStream out, String method, String path, String pin, String body) throws IOException {
         boolean post = method.equals("POST");
+        if (path.startsWith("/api/")) {
+            int refusal = refusal(pin);
+            if (refusal != 0) {
+                send(out, refusal, "text/plain", new byte[0]);
+                return;
+            }
+        }
         if (path.equals("/api/config")) {
             if (post) host.saveConfig(body);
             send(out, 200, "application/json", (post ? "{}" : host.config()).getBytes(StandardCharsets.UTF_8));
@@ -120,6 +137,24 @@ final class Remote extends Thread {
         }
     }
 
+    /** 0 when the PIN is right; otherwise the HTTP status to answer with. */
+    private synchronized int refusal(String given) {
+        String wanted = host.pin();
+        if (wanted.isEmpty()) return 403;                          // no PIN set: remote control is off
+        long now = System.currentTimeMillis();
+        if (now < lockedUntil) return 429;
+        if (given == null || given.isEmpty()) return 401;         // a first visit, not a guess
+        if (MessageDigest.isEqual(given.getBytes(StandardCharsets.UTF_8), wanted.getBytes(StandardCharsets.UTF_8))) {
+            wrongPins = 0;
+            return 0;
+        }
+        if (++wrongPins >= MAX_TRIES) {
+            wrongPins = 0;
+            lockedUntil = now + LOCK_MS;
+        }
+        return 401;
+    }
+
     private byte[] asset(String file) {
         try (InputStream in = assets.open(file)) {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -132,7 +167,7 @@ final class Remote extends Thread {
     }
 
     private static void send(OutputStream out, int status, String type, byte[] content) throws IOException {
-        String head = "HTTP/1.1 " + status + (status == 200 ? " OK" : " Not Found") + "\r\n"
+        String head = "HTTP/1.1 " + status + (status == 200 ? " OK" : " Refused") + "\r\n"
                 + "Content-Type: " + type + "; charset=utf-8\r\n"
                 + "Content-Length: " + content.length + "\r\n"
                 + "Cache-Control: no-store\r\nConnection: close\r\n\r\n";

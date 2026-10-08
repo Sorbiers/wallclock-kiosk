@@ -31,7 +31,10 @@
       by: "time", start: "22:00", end: "07:00",   // by: "time" = these hours, "dark" = when the room is dark
       dark_lux: 5, color: "#8f5cff", dim: 0.45, brightness: 0.03,
     },
-    day: { brightness: -1, color: "#ffffff" },   // brightness -1 = leave the backlight to Android
+    day: {
+      brightness: -1, color: "#ffffff",   // brightness -1 = leave the backlight to Android
+      auto: { on: true, min: 0.1, max: 1, full_lux: 300 },   // or scale it by the room light ourselves
+    },
     views: { camera_timeout_minutes: 10, weather_timeout_minutes: 0, buttons_hide_seconds: 6 },
     alarm: {
       min_total_seconds: 60, min_picture_seconds: 10, min_pictures: 3, max_pictures: 12,
@@ -47,6 +50,7 @@
     clock_alarms: [0, 1, 2, 3].map(() => ({ on: false, time: "07:00", days: "all" })),
     camera_user: "",
     camera_password: "",
+    remote_pin: "",   // the remote control works only while a PIN is set
     cameras: [
       { name: "Camera 1", host: "", stream: 0 },
       { name: "Camera 2", host: "", stream: 0 },
@@ -87,8 +91,8 @@
     remoteAddress: () => window.Android.remoteAddress(),
     lux: () => window.Android.lux(),   // room light from the tablet's sensor; below 0 = no sensor
   } : REMOTE ? {
-    getConfig: () => fetch("/api/config").then((r) => r.text()),
-    saveConfig: (json) => fetch("/api/config", { method: "POST", body: json }),
+    getConfig: () => api("/api/config"),
+    saveConfig: (json) => api("/api/config", json),
     configure: () => {},
     setBrightness: () => {},
     listSlides: async () => [],
@@ -107,7 +111,29 @@
 
   // The remote page sends commands; the tablet carries them out.
   function command(what) {
-    return fetch("/api/command", { method: "POST", body: JSON.stringify(what) });
+    return api("/api/command", JSON.stringify(what));
+  }
+
+  // Remote side: every request carries the PIN, kept in this browser. The
+  // tablet answers 401 when it is missing or wrong, and we ask for it.
+  async function api(path, body) {
+    for (;;) {
+      const options = { headers: { "X-Pin": localStorage.getItem("kiosk-pin") || "" } };
+      if (body != null) { options.method = "POST"; options.body = body; }
+      const reply = await fetch(path, options);
+      if (reply.ok) return reply.text();
+      if (reply.status === 403) {
+        alert("The remote control is off. Set a PIN in the settings on the tablet itself (gear, General).");
+        throw new Error("remote control is off");
+      }
+      if (reply.status === 429) {
+        alert("Too many wrong PINs. Try again in a minute.");
+        throw new Error("locked");
+      }
+      const pin = prompt("PIN for the wall clock");
+      if (pin === null) throw new Error("no PIN given");
+      localStorage.setItem("kiosk-pin", pin.trim());
+    }
   }
   // Colour pickers on the remote page: each change is shown on the tablet at
   // once, in the mode the colour belongs to (so a night colour can be judged by
@@ -295,10 +321,25 @@
     document.body.classList.toggle("night", night);
     const slideLight = night ? cfg.slides.brightness_night : cfg.slides.brightness_day;   // the slideshow's own backlight
     const level = view === "slides" && !ss.interlude && !ss.fading && slideLight >= 0 ? slideLight
-      : night ? cfg.night.brightness : cfg.day.brightness;
+      : night ? cfg.night.brightness : dayLight();
     if (level === lastBrightness) return;
     lastBrightness = level;
     native.setBrightness(level);
+  }
+
+  // Day backlight by the room light: from day.auto.min in the dark up to
+  // day.auto.max at full_lux, on a logarithmic scale (as the eye judges light).
+  // Android's own adaptive brightness is flat over the lower range on some
+  // tablets, which is why the app can do this itself.
+  let calmLux = -1;
+  function dayLight() {
+    const auto = cfg.day.auto;
+    const lux = auto.on && native.lux ? native.lux() : -1;
+    if (lux < 0) return cfg.day.brightness;   // switched off, or no sensor
+    calmLux = calmLux < 0 ? lux : calmLux + (lux - calmLux) * 0.25;   // smooth out the sensor's jitter
+    const low = Math.max(0, auto.min), high = Math.max(low, auto.max);
+    const share = Math.min(1, Math.log(1 + calmLux) / Math.log(1 + Math.max(1, auto.full_lux)));
+    return Math.round((low + (high - low) * share) * 100) / 100;   // whole percents: no constant fiddling
   }
 
   function renderClock(force) {
@@ -981,13 +1022,18 @@
     ["General", [
       ["locale", "Date language", [["en-CA", "English"], ["fr-CA", "Fran\u00E7ais"], ["ru-RU", "\u0420\u0443\u0441\u0441\u043A\u0438\u0439"]]],
       ["views.buttons_hide_seconds", "Hide the buttons after, s", "number", number],
+      ["remote_pin", "Remote control PIN (empty = remote control off)", "text"],
       ["night.by", "Night mode", [["time", "By the clock"], ["dark", "When the room is dark"]]],
       ["night.dark_lux", "Dark means below, lux", "number", number],
       ["night.start", "Night mode from", "time"],
       ["night.end", "Night mode until", "time"],
       ["night.brightness", "Night backlight, % (0 = the lowest the screen can do)", "number", percent],
       ["night.dim", "Night text strength, %", "number", percent],
-      ["day.brightness", "Day backlight, % (empty = automatic)", "number", percent],
+      ["day.brightness", "Day backlight when not following the room, % (empty = Android decides)", "number", percent],
+      ["day.auto.on", "Day backlight follows the room light", "checkbox"],
+      ["day.auto.min", "…in the dark, %", "number", percent],
+      ["day.auto.max", "…at its brightest, %", "number", percent],
+      ["day.auto.full_lux", "…brightest from, lux", "number", number],
       ["night.color", "Night colour", "color"],
       ["day.color", "Day colour", "color"],
       ["views.camera_timeout_minutes", "Camera view back to clock after, min (0 = never)", "number", number],
@@ -1076,7 +1122,7 @@
         else input.value = convert ? convert.show(value) : value == null ? "" : value;
         input.dataset.path = path;
         if (REMOTE && kind === "color") input.addEventListener("input", () => sendPreview(path, input.value));
-        if (REMOTE && kind === "password") input.placeholder = "unchanged";   // the tablet never sends it out
+        if (REMOTE && (kind === "password" || path === "remote_pin")) input.placeholder = "unchanged";   // never sent out
         row.append(el("span", "", field[1]), input);
         box.appendChild(row);
       });
@@ -1092,7 +1138,9 @@
     $("settings-test").hidden = SETTINGS[settingsTab][0] !== "Cameras";
     $("settings-ring").hidden = SETTINGS[settingsTab][0] !== "Alarm clock";
     const address = native.remoteAddress ? native.remoteAddress() : "";
-    $("settings-remote").textContent = address ? "Remote control from a PC or phone on this Wi-Fi: " + address : "";
+    $("settings-remote").textContent = !address ? ""
+      : cfg.remote_pin ? "Remote control from a PC or phone on this Wi-Fi: " + address
+      : "Remote control is off. Set a PIN on the General tab to use it from a PC or phone.";
   }
 
   // Helps to choose the "dark" limit: the sensor's reading, live, on the General tab.

@@ -39,8 +39,10 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
 - **Tablet: Android 11 or newer** with a current system WebView. Developed and
   tested on one device, a Lenovo Tab M9 (Android 13), with two Amcrest 5 MP
   cameras; there it plays both full-resolution streams at about 20 frames a second.
-- **The remote control has no login.** Anyone on the same Wi-Fi can change the
-  settings. The camera password is never sent to it.
+- **The remote control needs a PIN** that you set on the tablet; without one it
+  is off. It is plain HTTP on your own Wi-Fi, so treat the PIN as a lock
+  against other people in the house, not against a determined attacker. The
+  camera password is never sent to it.
 - The camera login is stored on the tablet in the app's private settings: use a
   view-only camera user.
 - The cameras are only read; nothing on them is changed.
@@ -54,7 +56,7 @@ script calls the SDK tools directly.
 
 | Script | Does |
 |---|---|
-| `build.bat` | Builds `dist\wallclock.apk` |
+| `build.bat [--debug]` | Builds `dist\wallclock.apk`; `--debug` makes the page inspectable over USB (chrome://inspect) |
 | `deploy.bat` | Installs it over USB (USB debugging on) and starts it; settings on the tablet are kept |
 | `sync-slides.bat [folder]` | Copies the slideshow pictures (default: `slides\`) to the tablet, shrunk to tablet size |
 | `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet; pictures and live view are real |

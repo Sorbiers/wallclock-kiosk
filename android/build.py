@@ -1,8 +1,9 @@
-"""Build the Wall Clock app: python android/build.py  ->  dist/wallclock.apk
+"""Build the Wall Clock app: python android/build.py [--debug]  ->  dist/wallclock.apk
 
 Uses Google's SDK tools directly (no Gradle): aapt2 packs the manifest, the
 icon and the page (web/ becomes the app's assets), javac and d8 compile the
-Java code, zipalign and apksigner finish the APK. Needs a JDK on PATH and the
+Java code, zipalign and apksigner finish the APK. --debug makes a build whose
+page can be inspected from a PC over USB (chrome://inspect). Needs a JDK on PATH and the
 Android SDK (set ANDROID_SDK_ROOT if it is not in the default place).
 """
 
@@ -50,7 +51,8 @@ def main() -> None:
     run(TOOLS / "aapt2", "link", "-o", BUILD / "base.apk", "-I", PLATFORM,
         "--manifest", APP / "AndroidManifest.xml", "-A", ROOT / "web", "--java", BUILD / "gen",
         "--min-sdk-version", MIN_SDK, "--target-sdk-version", TARGET_SDK,
-        "--version-code", VERSION_CODE, "--version-name", VERSION_NAME, BUILD / "res.zip")
+        "--version-code", VERSION_CODE, "--version-name", VERSION_NAME,
+        *(["--debug-mode"] if "--debug" in sys.argv else []), BUILD / "res.zip")
 
     # Java -> classes -> dex
     sources = [*(APP / "src").rglob("*.java"), *(BUILD / "gen").rglob("*.java")]
@@ -73,7 +75,7 @@ def main() -> None:
             "-dname", "CN=Wall Clock")
     run(TOOLS / "apksigner.bat", "sign", "--ks", KEYSTORE, "--ks-pass", "pass:" + KEY_PASSWORD,
         "--out", OUT, BUILD / "aligned.apk")
-    print(f"\nBuilt {OUT} ({OUT.stat().st_size // 1024} KB)")
+    print(f"\nBuilt {OUT} ({OUT.stat().st_size // 1024} KB)" + (", DEBUG build" if "--debug" in sys.argv else ""))
 
 
 if __name__ == "__main__":
