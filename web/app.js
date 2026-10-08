@@ -240,7 +240,7 @@
     night = isNight(new Date()) && !inUse;
     document.body.classList.toggle("night", night);
     const slideLight = night ? cfg.slides.brightness_night : cfg.slides.brightness_day;   // the slideshow's own backlight
-    const level = view === "slides" && !ss.interlude && slideLight >= 0 ? slideLight
+    const level = view === "slides" && !ss.interlude && !ss.fading && slideLight >= 0 ? slideLight
       : night ? cfg.night.brightness : cfg.day.brightness;
     if (level === lastBrightness) return;
     lastBrightness = level;
@@ -380,7 +380,8 @@
     },
   };
   const SS_TRANS_MS = 1100;
-  const ss = { items: [], deck: [], layers: [], front: 0, last: null, timer: null, run: 0, count: 0, interlude: false };
+  const BACKLIGHT_RAMP_MS = 5000;   // Android changes the backlight this slowly
+  const ss = { items: [], deck: [], layers: [], front: 0, last: null, timer: null, run: 0, count: 0, interlude: false, fading: false, fadeTimer: null };
 
   ss.layers = [0, 1].map(() => {
     const layer = { el: el("div", "ss-slide"), back: el("div", "ss-backdrop"), img: el("img", "ss-img"), drift: null };
@@ -392,6 +393,7 @@
   // The clock page shown between pictures (slides.clock_every); the mode stays Slides.
   function interlude(on) {
     ss.interlude = on;
+    ss.fading = false;
     $("view-slides").hidden = on;
     $("view-clock").hidden = !on;
     updateMode();
@@ -415,6 +417,7 @@
     const run = ++ss.run;
     ss.count = 0;
     ss.interlude = false;
+    ss.fading = false;
     $("ss-digits").hidden = !cfg.slides.clock;
     $("ss-empty").hidden = true;
     let names = [];
@@ -429,6 +432,8 @@
   function stopSlides() {
     ss.run++;
     ss.interlude = false;
+    ss.fading = false;
+    clearTimeout(ss.fadeTimer);
     clearTimeout(ss.timer);
     ss.layers.forEach((layer) => {
       layer.el.getAnimations().forEach((a) => a.cancel());
@@ -477,9 +482,16 @@
     ss.front = 1 - ss.front;
     ss.count++;
     if (ss.items.length < 2) return;
+    const every = cfg.slides.clock_every;
+    if (!(every > 0) || ss.count % every) {
+      ss.timer = setTimeout(() => nextSlide(false), hold);
+      return;
+    }
+    // The clock page is next. Its backlight differs from the slideshow's and
+    // Android changes it slowly, so start the change under the last picture:
+    // the clock then appears already at its own level instead of too bright.
+    ss.fadeTimer = setTimeout(() => { ss.fading = true; updateMode(); }, Math.max(0, hold - BACKLIGHT_RAMP_MS));
     ss.timer = setTimeout(() => {
-      const every = cfg.slides.clock_every;
-      if (!(every > 0) || ss.count % every) { nextSlide(false); return; }
       interlude(true);
       ss.timer = setTimeout(() => { interlude(false); nextSlide(false); }, Math.max(3, cfg.slides.clock_seconds) * 1000);
     }, hold);
