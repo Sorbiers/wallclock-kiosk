@@ -1,0 +1,19 @@
+# Build output
+android/build/
+dist/
+__pycache__/
+*.pyc
+
+# Signing key: needed to update the installed app, but it stays out of history
+android/*.keystore
+
+# Personal: this home's addresses, own pictures, screenshots of the cameras
+web/local.js
+slides/
+docs/
+
+# Local tool state
+.claude/*
+!.claude/launch.json
+logs/
+data/

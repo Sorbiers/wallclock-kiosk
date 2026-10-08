@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>Wall Clock</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main id="view-clock" class="view">
+  <div class="digits" id="clock-digits"></div>
+  <div class="dateline" id="clock-date"></div>
+  <div class="wxline" id="clock-wx"></div>
+</main>
+
+<main id="view-camera" class="view" hidden>
+  <header class="head">
+    <div class="digits" id="cam-digits"></div>
+    <div class="dateline" id="cam-date"></div>
+  </header>
+  <div class="cams" id="cams"></div>
+</main>
+
+<main id="view-weather" class="view" hidden>
+  <header class="head">
+    <div class="digits" id="wx-digits"></div>
+    <div class="headtext">
+      <div class="dateline" id="wx-date"></div>
+      <div class="wx-place" id="wx-place"></div>
+    </div>
+  </header>
+  <section class="wx-now" id="wx-now"></section>
+  <section class="wx-strip" id="wx-hours"></section>
+  <section class="wx-strip" id="wx-days"></section>
+</main>
+
+<main id="view-slides" class="view" hidden>
+  <div class="ss-stage" id="ss-stage"></div>
+  <div class="digits ss-clock" id="ss-digits"></div>
+  <div class="ss-empty" id="ss-empty" hidden>No pictures yet. Put them in the slides folder on the PC and run sync-slides.bat.</div>
+</main>
+
+<main id="view-settings" class="view" hidden>
+  <div class="settings">
+    <div class="tabs" id="settings-tabs"></div>
+    <form id="settings-form" onsubmit="return false"></form>
+    <p class="settings-hint" id="settings-hint" hidden>Pictures come from the slides folder on the PC: run sync-slides.bat with the tablet plugged in.</p>
+    <p class="settings-hint" id="settings-remote"></p>
+    <div class="settings-actions">
+      <button type="button" id="settings-system">Android settings</button>
+      <button type="button" id="settings-stop" hidden>Stop alarm</button>
+      <button type="button" id="settings-test">Test camera alarm</button>
+      <button type="button" id="settings-ring">Test alarm clock</button>
+      <button type="button" id="settings-save" class="primary">Save</button>
+    </div>
+  </div>
+</main>
+
+<nav id="nav" class="nav">
+  <button type="button" data-view="clock">Clock</button>
+  <button type="button" data-view="camera">Camera</button>
+  <button type="button" data-view="weather">Weather</button>
+  <button type="button" data-view="slides">Slides</button>
+  <button type="button" data-view="settings" aria-label="Settings">&#9881;</button>
+</nav>
+
+<div id="status" class="status" hidden></div>
+
+<div id="wake" class="wake" hidden>
+  <div class="wake-label">Alarm</div>
+  <div class="wake-actions">
+    <button type="button" id="wake-snooze">Snooze 5 min</button>
+    <button type="button" id="wake-stop" class="primary">Stop</button>
+  </div>
+</div>
+
+<div id="alarm" class="alarm" hidden>
+  <div class="alarm-wait" id="alarm-wait">Waiting for picture</div>
+  <img id="alarm-img" alt="">
+  <div class="alarm-top">
+    <span class="alarm-tag">Alarm</span>
+    <span id="alarm-caption"></span>
+    <span id="alarm-count"></span>
+  </div>
+  <button type="button" id="alarm-cancel" class="alarm-cancel">Cancel</button>
+</div>
+
+<script src="local.js"></script>
+<script src="rtsp.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
