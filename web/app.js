@@ -38,6 +38,7 @@
       seconds: 8, transition: "random", motion: true, clock: true,
       brightness_day: -1, brightness_night: -1,   // -1 = the usual day / night backlight
       clock_every: 0, clock_seconds: 20,          // the clock page after every N pictures; 0 = never
+      auto_start: "", auto_stop: "",              // "HH:MM": run by itself between these; empty = off
     },
     wake: { sound: "chime", seconds: 30, rounds: 3 },   // how the alarm clock rings
     clock_alarms: [0, 1, 2, 3].map(() => ({ on: false, time: "07:00", days: "all" })),
@@ -137,27 +138,40 @@
     return node;
   }
 
+  // Four digits in a row with a colon, or (stacked) the hours above the minutes
+  // so an upright tablet can show them about twice as large.
+  const ROW = "-18 -2 548 184", STACK = "-18 -2 248 390", STACK_ROW_Y = 206, SLANT = " skewX(-5)";
+
   function buildDigits(host) {
     const svg = document.createElementNS(SVG_NS, "svg");
-    svg.setAttribute("viewBox", "-18 -2 548 184");
-    const slant = document.createElementNS(SVG_NS, "g");
-    slant.setAttribute("transform", "skewX(-5)");
-    svg.appendChild(slant);
-    const digits = DIGIT_X.map((x) => {
-      const group = document.createElementNS(SVG_NS, "g");
-      group.setAttribute("transform", "translate(" + x + ",0)");
+    const digits = DIGIT_X.map(() => {
+      const group = svg.appendChild(document.createElementNS(SVG_NS, "g"));
       const segs = {};
       Object.keys(SEGMENTS).forEach((name) => { segs[name] = group.appendChild(polygon(SEGMENTS[name], "seg")); });
-      slant.appendChild(group);
-      return segs;
+      return { group: group, segs: segs };
     });
-    const dots = [0, 60].map((dy) => slant.appendChild(polygon(COLON.map((p) => [p[0], p[1] + dy]), "seg on")));
+    const dots = [0, 60].map((dy) => {
+      const dot = svg.appendChild(polygon(COLON.map((p) => [p[0], p[1] + dy]), "seg on"));
+      dot.setAttribute("transform", SLANT.trim());
+      return dot;
+    });
+    function arrange(stacked) {
+      svg.setAttribute("viewBox", stacked ? STACK : ROW);
+      digits.forEach((digit, i) => {
+        const x = stacked ? DIGIT_X[i % 2] : DIGIT_X[i], y = stacked && i > 1 ? STACK_ROW_Y : 0;
+        digit.group.setAttribute("transform", "translate(" + x + "," + y + ")" + SLANT);   // each row slants on its own
+      });
+      dots.forEach((dot) => { dot.style.display = stacked ? "none" : ""; });
+      host.classList.toggle("stacked", stacked);
+    }
+    arrange(false);
     host.appendChild(svg);
     return {
+      arrange: arrange,
       set(hhmm) {
-        digits.forEach((segs, i) => {
+        digits.forEach((digit, i) => {
           const lit = DIGIT_SEGMENTS[+hhmm[i]];
-          Object.keys(segs).forEach((name) => segs[name].classList.toggle("on", lit.includes(name)));
+          Object.keys(digit.segs).forEach((name) => digit.segs[name].classList.toggle("on", lit.includes(name)));
         });
       },
       // Driven by the clock tick, so a pulsing colon proves the page is alive.
@@ -197,15 +211,25 @@
 
   // --- clock, date, day / night ---------------------------------------------
   const clocks = ["clock", "cam", "wx", "ss"].map((name) => buildDigits($(name + "-digits")));
+  // Upright tablet: the main clock stacks; the small header clocks stay in a row.
+  const upright = window.matchMedia("(orientation: portrait)");
+  const arrangeClock = () => clocks[0].arrange(upright.matches);
+  upright.addEventListener("change", arrangeClock);
+  arrangeClock();
   let shownTime = "";
   let night = false;
   let lastBrightness = null;
 
   function isNight(now) {
     if (params.has("night")) return params.get("night") === "1";   // ?night=1 previews it
+    return inSpan(cfg.night.start, cfg.night.end, now);
+  }
+
+  // Is `now` between two "HH:MM" times? The span may run past midnight.
+  function inSpan(from, until, now) {
     const mins = (hhmm) => { const p = hhmm.split(":"); return +p[0] * 60 + +p[1]; };
     const t = now.getHours() * 60 + now.getMinutes();
-    const start = mins(cfg.night.start), end = mins(cfg.night.end);
+    const start = mins(from), end = mins(until);
     return start <= end ? t >= start && t < end : t >= start || t < end;
   }
 
@@ -371,6 +395,20 @@
     $("view-slides").hidden = on;
     $("view-clock").hidden = !on;
     updateMode();
+  }
+
+  // Auto run: the slideshow comes up when the set span begins and gives way to
+  // the clock when it ends. It acts only at those two moments, so switching
+  // views by hand in between is respected.
+  let autoRunning = false;
+  function checkSlideSchedule() {
+    const s = cfg.slides;
+    if (REMOTE || !s.auto_start || !s.auto_stop) return;
+    const due = inSpan(s.auto_start, s.auto_stop, new Date());
+    if (due === autoRunning || view === "settings") return;
+    autoRunning = due;
+    if (due) show("slides");
+    else if (view === "slides") show("clock");
   }
 
   async function startSlides() {
@@ -851,6 +889,8 @@
       ["slides.clock_every", "Show the clock page after every N pictures (0 = never)", "number", number],
       ["slides.clock_seconds", "Clock page stays, s", "number", number],
       ["slides.clock", "Show the time", "checkbox"],
+      ["slides.auto_start", "Start by itself at (empty = off)", "time"],
+      ["slides.auto_stop", "Back to the clock at", "time"],
     ]],
     ["Alarm clock", [
       ["wake.sound", "Sound", Object.keys(SOUNDS).map((key) => [key, SOUNDS[key].name])],
@@ -975,6 +1015,7 @@
     updateMode();
     alarmTick();
     checkClockAlarms();
+    checkSlideSchedule();
     checkIdle();
     renderStatus();
   }, 500);

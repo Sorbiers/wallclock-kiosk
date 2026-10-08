@@ -66,6 +66,8 @@ body.night .seg.on.rest { opacity: 0.3; }
 /* --- clock view -------------------------------------------------------- */
 #view-clock { align-items: center; justify-content: center; padding-bottom: 3vh; }
 #clock-digits { width: min(88vw, 172vh); }
+.digits.stacked { aspect-ratio: 248 / 390; }          /* hours over minutes (portrait) */
+#clock-digits.stacked { width: min(84vw, 42vh); }
 
 .dateline {
   margin-top: 6.5vh;
@@ -407,3 +409,55 @@ body.remote .settings-actions { flex-wrap: wrap; }
   padding: 3vh 6vw;
 }
 .wake-actions .primary { background: #fff; color: #000; }
+
+/* --- portrait (the tablet upright): the same pages, restacked ------------------
+   Sizes switch from height-based to width-based, since the width is now the short side. */
+@media (orientation: portrait) {
+  .dateline { font-size: 4.4vw; margin-top: 4vh; }
+  .wxline { font-size: 5vw; flex-wrap: wrap; justify-content: center; gap: 1vh 4vw; }
+  .wxline .emoji { font-size: 6vw; }
+
+  .head { flex-direction: column; align-items: flex-start; gap: 1.6vh; padding-bottom: 2vh; }
+  .head .digits { height: 9vh; }
+  .head .dateline { font-size: 4.2vw; }
+  .wx-place { font-size: 2.6vw; }
+
+  .wx-now { flex-wrap: wrap; align-content: center; gap: 1vh 4vw; padding: 2vh 0; }
+  .wx-now .emoji { font-size: 9vh; }
+  .wx-now .temp { font-size: 12vh; }
+  .wx-now .desc { font-size: 5vw; max-width: none; }
+  .wx-metrics { margin-left: 0; width: 100%; gap: 1.6vh 4vw; }
+  .wx-metrics dt { font-size: 2.4vw; }
+  .wx-metrics dd { font-size: 4.4vw; }
+  .cell .when { font-size: 2.5vw; letter-spacing: 0.08em; }
+  .cell .emoji { font-size: 6.5vw; }
+  .cell .t { font-size: 3.6vw; }
+  .cell .p { font-size: 2.4vw; }
+
+  #view-camera .head { padding: 3vh 4vw 0; }
+  .cams { grid-template-columns: 1fr; align-content: center; }   /* cameras one above the other */
+
+  .nav button { font-size: 2.7vw; letter-spacing: 0.12em; text-indent: 0.12em; padding: 1.6vh 2.6vw; }
+  .status { font-size: 2.6vw; }
+
+  .alarm-top { flex-wrap: wrap; font-size: 3.4vw; padding: 2vh 4vw 4vh; }
+  .alarm-cancel { font-size: 4.4vw; padding: 2vh 6vw; }
+  .wake-label { font-size: 6vw; }
+  .wake-actions { flex-direction: column; align-items: stretch; gap: 2vh; }
+  .wake-actions button { font-size: 5vw; padding: 2.2vh 8vw; }
+
+  .settings { padding-top: 2vh; }
+  .settings fieldset { grid-template-columns: 1fr; }
+  .settings fieldset.three { grid-template-columns: 1fr 1fr 1fr; gap: 1.4vh 2vw; }
+  .tabs button { font-size: 3vw; padding: 1.2vh 3vw; }
+  .field { font-size: 3vw; }
+  .field input, .field select { font-size: 4.2vw; padding: 1vh 2vw; }
+  .field.check { font-size: 3.6vw; }
+  .field.check input { width: 6vw; height: 6vw; }
+  .settings-hint { font-size: 3vw; }
+  .settings-actions { flex-wrap: wrap; }
+  .settings-actions button { font-size: 3.4vw; padding: 1.6vh 5vw; }
+
+  .ss-clock { height: 7vh; }
+  .ss-empty { font-size: 4.4vw; }
+}
