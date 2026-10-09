@@ -9,6 +9,7 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.media.AudioManager;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.View;
@@ -46,6 +47,7 @@ public class MainActivity extends Activity {
     private Cameras cameras;
     private Remote remote;
     private volatile float lux = -1f;   // room light from the sensor; below 0 = not known
+    private int volumeBefore = -1;      // the tablet's media volume to put back after an alarm; below 0 = untouched
 
     private final SensorEventListener light = new SensorEventListener() {
         @Override
@@ -283,6 +285,28 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void openSystemSettings() {
             startActivity(new Intent(Settings.ACTION_SETTINGS));
+        }
+
+        /**
+         * Media volume as a share of the loudest the tablet can do, for as long
+         * as an alarm rings; below 0 puts back what it was before.
+         */
+        @JavascriptInterface
+        public synchronized void setVolume(float share) {
+            try {
+                AudioManager audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+                if (share < 0) {
+                    if (volumeBefore >= 0) audio.setStreamVolume(AudioManager.STREAM_MUSIC, volumeBefore, 0);
+                    volumeBefore = -1;
+                    return;
+                }
+                if (volumeBefore < 0) volumeBefore = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+                int loudest = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                int level = Math.round(Math.min(1f, share) * loudest);
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, share > 0 ? Math.max(1, level) : 0, 0);
+            } catch (RuntimeException refused) {
+                // the tablet keeps its own volume
+            }
         }
 
         /** Forget the pictures the page keeps in memory, so the slideshow reads its folder again. */

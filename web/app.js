@@ -48,7 +48,7 @@
       auto_start: "", auto_stop: "",              // "HH:MM": run by itself between these; empty = off
     },
     wake: { sound: "chime", seconds: 30, rounds: 3, media_minutes: 10 },   // how the alarm clock rings
-    clock_alarms: [0, 1, 2, 3].map(() => ({ on: false, time: "07:00", days: "all", sound: "", media: "", youtube: "" })),
+    clock_alarms: [0, 1, 2, 3].map(() => ({ on: false, time: "07:00", days: "all", sound: "", volume: 0.6, media: "", youtube: "" })),
     camera_user: "",
     camera_password: "",
     remote_pin: "",   // the remote control works only while a PIN is set
@@ -94,6 +94,7 @@
     lux: () => window.Android.lux(),   // room light from the tablet's sensor; below 0 = no sensor
     clearCache: () => window.Android.clearCache(),
     restart: () => window.Android.restart(),
+    setVolume: (share) => window.Android.setVolume(share),
   } : REMOTE ? {
     getConfig: () => api("/api/config"),
     saveConfig: (json) => api("/api/config", json),
@@ -260,7 +261,7 @@
   };
   let audio = null;
 
-  function play(notes) {
+  function play(notes, loud) {   // loud: 0..1, full when left out
     try {
       audio = audio || new (window.AudioContext || window.webkitAudioContext)();
       if (audio.state === "suspended") audio.resume();
@@ -269,7 +270,7 @@
         const osc = audio.createOscillator(), amp = audio.createGain();
         osc.frequency.value = note[0];
         amp.gain.setValueAtTime(0, start);
-        amp.gain.linearRampToValueAtTime(0.3, start + 0.02);
+        amp.gain.linearRampToValueAtTime(0.3 * (loud == null ? 1 : Math.max(0.02, loud)), start + 0.02);
         amp.gain.exponentialRampToValueAtTime(0.001, start + note[2]);
         osc.connect(amp).connect(audio.destination);
         osc.start(start);
@@ -279,7 +280,7 @@
   }
 
   // --- clock, date, day / night ---------------------------------------------
-  const clocks = ["clock", "cam", "wx", "ss", "ev"].map((name) => buildDigits($(name + "-digits")));
+  const clocks = ["clock", "cam", "wx", "ss", "ev", "wake"].map((name) => buildDigits($(name + "-digits")));
   // Upright tablet: the main clock stacks; the small header clocks stay in a row.
   const upright = window.matchMedia("(orientation: portrait)");
   const arrangeClock = () => clocks[0].arrange(upright.matches);
@@ -1152,20 +1153,29 @@
     return Object.keys(MEDIA_KINDS).find((kind) => MEDIA_KINDS[kind].includes(ext)) || "";
   }
 
+  // An alarm's volume is a share of the loudest the tablet can do: the tablet's
+  // own volume is set for as long as the alarm rings and put back afterwards,
+  // so it sounds the same whatever the tablet was set to. Where that cannot be
+  // done (a desktop browser), the page turns its own sound down instead.
+  const loudness = (how) => (how.volume >= 0 ? Math.min(1, how.volume) : 1);
+  const ownLoudness = (how) => (native.setVolume ? 1 : loudness(how));
+
   function youtubeId(link) {
     const found = /(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/|\/live\/)([\w-]{11})/.exec(link || "");
     return found ? found[1] : "";
   }
 
-  // how: an alarm's { sound, media, youtube }; what it leaves out comes from
+  // how: an alarm's { sound, volume, media, youtube }; what it leaves out comes from
   // wake. Without it, what rang last rings again (Snooze).
   function ring(how) {
     how = Object.assign({}, cfg.wake, how || lastRing);
     stopRinging(0);
     lastRing = how;
     ringing = true;
+    if (native.setVolume) native.setVolume(loudness(how));
     const video = youtubeId(how.youtube), kind = video ? "youtube" : mediaKind(how.media);
-    $("wake").classList.toggle("with-media", kind !== "" && kind !== "audio");
+    $("wake").classList.toggle("with-video", kind === "video" || kind === "youtube");
+    $("wake").classList.toggle("with-picture", kind === "picture");
     $("wake").hidden = false;
     if (kind === "youtube") playYoutube(video, how);
     else if (kind === "audio" || kind === "video") playFile(kind, how);
@@ -1185,9 +1195,9 @@
     const startRound = () => {
       round++;
       const until = Date.now() + Math.max(2, how.seconds) * 1000;
-      play(sound.notes);
+      play(sound.notes, ownLoudness(how));
       ringTimer = setInterval(() => {
-        if (Date.now() < until) { play(sound.notes); return; }
+        if (Date.now() < until) { play(sound.notes, ownLoudness(how)); return; }
         clearInterval(ringTimer);
         if (round >= how.rounds) stopRinging(0);
         else pauseTimer = setTimeout(startRound, ROUND_PAUSE_MS);
@@ -1212,6 +1222,7 @@
     const player = $("wake-video");
     player.hidden = kind !== "video";   // music plays unseen
     player.loop = true;
+    player.volume = ownLoudness(how);
     player.onplaying = () => { player.onplaying = null; mediaStarted(how); };
     player.onerror = () => ringSound(how);
     player.src = "/media/" + encodeURIComponent(how.media);
@@ -1249,6 +1260,7 @@
       clearInterval(tube.hello);
       tube.hello = null;
       ["onStateChange", "onError"].forEach((name) => say(tube, { event: "command", func: "addEventListener", args: [name] }));
+      say(tube, { event: "command", func: "setVolume", args: [Math.round(ownLoudness(tube.how) * 100)] });
     }
     const state = said.event === "onStateChange" ? said.info : said.info && said.info.playerState;
     if (said.event === "onError") ringSound(tube.how);   // not found, or not allowed outside YouTube
@@ -1273,6 +1285,8 @@
       tube = null;
     }
     ringing = false;
+    endTest();
+    if (native.setVolume) native.setVolume(-1);   // the tablet's volume as it was
     snoozeUntil = snoozeMinutes ? Date.now() + snoozeMinutes * 60000 : 0;
     $("wake").hidden = true;
     lastTouch = Date.now();
@@ -1289,11 +1303,13 @@
   const HINTS = {
     Slideshow: "Pictures come from the slides folder on the PC: run sync-slides.bat, then tap Slides to load them.",
     "Alarm clock": "Music, videos and pictures come from the media folder on the PC: run sync-media.bat. "
-      + "A YouTube link is played when given; a picture is shown while the sound rings.",
+      + "A YouTube link is played when given; a picture is shown while the sound rings. "
+      + "An alarm's volume is a share of the loudest the tablet can do, whatever its volume is set to.",
   };
-  // Tabs of [setting, label, kind, conversion, button]; kind is an input type, a
-  // list of choices, or "media" (a file from the media folder); button is
-  // [label, action] for a button beside the field.
+  // Tabs of [setting, label, kind, conversion, extra]; kind is an input type, a
+  // list of choices, "media" (a file from the media folder) or "rule" (a line
+  // between groups); extra: { button: [label, action] } puts a button beside
+  // the field, { wide: true } gives the field the whole row.
   const percent = { show: (v) => (v < 0 ? "" : Math.round(v * 100)), read: (s) => (s === "" ? -1 : Math.min(100, Math.max(0, +s)) / 100) };
   const number = { show: (v) => v, read: (s) => Math.max(0, +s || 0) };
   const SETTINGS = [
@@ -1355,12 +1371,14 @@
       ["wake.rounds", "Repeat, times (20 s apart)", "number", number],
       ["wake.media_minutes", "Music or video plays for, min", "number", number],
     ].concat([0, 1, 2, 3].reduce((rows, i) => rows.concat([
-      ["clock_alarms." + i + ".on", "Alarm " + (i + 1), "checkbox", null, ["Test", () => ringAsShown(i)]],
+      ["", "", "rule"],
+      ["clock_alarms." + i + ".on", "Alarm " + (i + 1), "checkbox", null, { button: ["Test", (button) => ringAsShown(i, button)] }],
       ["clock_alarms." + i + ".time", "Time", "time"],
       ["clock_alarms." + i + ".days", "Days", DAYS],
       ["clock_alarms." + i + ".sound", "Sound", SOUND_NAMES],
+      ["clock_alarms." + i + ".volume", "Volume, % of the loudest", "number", percent],
       ["clock_alarms." + i + ".media", "Music, video or picture", "media"],
-      ["clock_alarms." + i + ".youtube", "or a YouTube link", "text"],
+      ["clock_alarms." + i + ".youtube", "or a YouTube link", "text", null, { wide: true }],
     ]), [])), "three"],
   ];
   const FIELDS = SETTINGS.reduce((all, tab) => all.concat(tab[1]), []);
@@ -1387,8 +1405,9 @@
       tabs.appendChild(button);
       const box = el("fieldset", tab[2] || "");
       tab[1].forEach((field) => {
-        const path = field[0], kind = field[2], convert = field[3], action = field[4];
-        const row = el("label", kind === "checkbox" ? "field check" : "field");
+        const path = field[0], kind = field[2], convert = field[3], extra = field[4] || {};
+        if (kind === "rule") { box.appendChild(el("div", "field-rule")); return; }
+        const row = el("label", (kind === "checkbox" ? "field check" : "field") + (extra.wide ? " wide" : ""));
         const value = pathGet(cfg, path);
         let input;
         if (Array.isArray(kind) || kind === "media") {
@@ -1411,10 +1430,10 @@
         if (REMOTE && kind === "color") input.addEventListener("input", () => sendPreview(path, input.value));
         if (REMOTE && (kind === "password" || path === "remote_pin")) input.placeholder = "unchanged";   // never sent out
         row.append(el("span", "", field[1]), input);
-        if (action) {
-          const button = el("button", "field-action", action[0]);
+        if (extra.button) {
+          const button = el("button", "field-action", extra.button[0]);
           button.type = "button";
-          button.addEventListener("click", action[1]);
+          button.addEventListener("click", () => extra.button[1](button));
           row.appendChild(button);
         }
         box.appendChild(row);
@@ -1464,18 +1483,43 @@
     onCameraEvent({ cam: chosen, code: TEST_CODE, action: "Pulse", index: 0 });
   }
   $("settings-test").addEventListener("click", () => (REMOTE ? command({ test: true }) : testAlarm()));
-  // Test one alarm with what the form shows now, saved or not.
-  function ringAsShown(i) {
+  // Test one alarm with what the form shows now, saved or not. While it rings
+  // its button says Stop.
+  let testing = null;   // { button, timer } while a test rings
+
+  function endTest() {
+    if (!testing) return;
+    clearTimeout(testing.timer);
+    testing.button.textContent = "Test";
+    testing = null;
+  }
+
+  function ringAsShown(i, button) {
+    if (testing && testing.button === button) {   // pressed again: stop it
+      endTest();
+      if (REMOTE) command({ stop: true }); else stopRinging(0);
+      return;
+    }
+    endTest();
     const shown = (path) => $("settings-form").querySelector('[data-path="' + path + '"]').value.trim();
     const alarm = "clock_alarms." + i + ".";
     const how = {
-      sound: shown(alarm + "sound"), media: shown(alarm + "media"), youtube: shown(alarm + "youtube"),
+      sound: shown(alarm + "sound"), volume: percent.read(shown(alarm + "volume")),
+      media: shown(alarm + "media"), youtube: shown(alarm + "youtube"),
       seconds: +shown("wake.seconds"), rounds: +shown("wake.rounds"), media_minutes: +shown("wake.media_minutes"),
     };
     if (REMOTE) command({ ring: how }); else ring(how);
+    button.textContent = "Stop";
+    // The remote page is not told when the tablet falls silent, so it reckons
+    // how long this alarm can last.
+    const rounds = Math.max(1, how.rounds);
+    const lasts = youtubeId(how.youtube) || ["audio", "video"].includes(mediaKind(how.media))
+      ? Math.max(1, how.media_minutes) * 60000
+      : Math.max(2, how.seconds) * 1000 * rounds + ROUND_PAUSE_MS * (rounds - 1);
+    testing = { button: button, timer: setTimeout(endTest, lasts + 2000) };
   }
   $("settings-stop").hidden = !REMOTE;
-  $("settings-stop").addEventListener("click", () => command({ stop: true }));
+  $("settings-stop").addEventListener("click", () => { endTest(); command({ stop: true }); });
 
   // --- start ----------------------------------------------------------------------
   async function start() {
@@ -1484,7 +1528,7 @@
       if (saved) cfg = merge(BASE, JSON.parse(saved));
     } catch (e) { /* first run, or unreadable settings: defaults */ }
     // Alarms saved before each had its own sound and media get them now.
-    cfg.clock_alarms = cfg.clock_alarms.map((a) => Object.assign({ media: "", youtube: "" }, a, { sound: a.sound || cfg.wake.sound }));
+    cfg.clock_alarms = cfg.clock_alarms.map((a) => Object.assign({ volume: 0.6, media: "", youtube: "" }, a, { sound: a.sound || cfg.wake.sound }));
     const root = document.documentElement.style;
     root.setProperty("--night", cfg.night.color);
     root.setProperty("--day", cfg.day.color);
