@@ -344,7 +344,7 @@ body.night .seg.on.rest { opacity: 0.3; }
 .settings fieldset { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.2); padding: 2.4vh 0 1vh; }
 .settings legend { padding-right: 1.4vw; font-size: 2.3vh; letter-spacing: 0.2em; text-transform: uppercase; opacity: 0.6; }
 .settings fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.8vh 4vw; }   /* columns may shrink below their inputs */
-.field { display: flex; flex-direction: column; gap: 0.8vh; font-size: 2.3vh; }
+.field { display: flex; flex-direction: column; justify-content: flex-end; gap: 0.8vh; font-size: 2.3vh; }   /* inputs level even when a label wraps */
 .field span { opacity: 0.7; }
 .field input, .field select {
   font: inherit;
@@ -421,7 +421,6 @@ body.remote .settings-actions { flex-wrap: wrap; }
   padding: 1vh 1.8vw;
 }
 .field-rule { grid-column: 1 / -1; margin-top: 1.4vh; border-top: 1px solid rgba(255, 255, 255, 0.2); }   /* between the alarms */
-.field.wide { grid-column: 1 / -1; }
 .settings fieldset.three .field.check { align-self: end; padding-bottom: 1vh; }   /* level with the inputs beside it */
 .field.check { flex-direction: row; align-items: center; gap: 1.4vw; font-size: 2.8vh; }
 .field.check input { order: -1; width: 4.4vh; height: 4.4vh; padding: 0; accent-color: #fff; }
