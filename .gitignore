@@ -13,6 +13,7 @@ tablet.local.txt
 local.bat
 dev/cameras.env
 slides/
+media/
 docs/
 
 # Local tool state

@@ -47,8 +47,8 @@
       clock_every: 0, clock_seconds: 20,          // the clock page after every N pictures; 0 = never
       auto_start: "", auto_stop: "",              // "HH:MM": run by itself between these; empty = off
     },
-    wake: { sound: "chime", seconds: 30, rounds: 3 },   // how the alarm clock rings
-    clock_alarms: [0, 1, 2, 3].map(() => ({ on: false, time: "07:00", days: "all" })),
+    wake: { sound: "chime", seconds: 30, rounds: 3, media_minutes: 10 },   // how the alarm clock rings
+    clock_alarms: [0, 1, 2, 3].map(() => ({ on: false, time: "07:00", days: "all", sound: "", media: "", youtube: "" })),
     camera_user: "",
     camera_password: "",
     remote_pin: "",   // the remote control works only while a PIN is set
@@ -89,6 +89,7 @@
     setBrightness: (level) => window.Android.setBrightness(level),
     openSystemSettings: () => window.Android.openSystemSettings(),
     listSlides: async () => JSON.parse(window.Android.listSlides()),
+    listMedia: async () => JSON.parse(window.Android.listMedia()),
     remoteAddress: () => window.Android.remoteAddress(),
     lux: () => window.Android.lux(),   // room light from the tablet's sensor; below 0 = no sensor
     clearCache: () => window.Android.clearCache(),
@@ -99,6 +100,7 @@
     configure: () => {},
     setBrightness: () => {},
     listSlides: async () => [],
+    listMedia: () => api("/api/media").then(JSON.parse),
   } : {   // desktop browser: the dev server plays the native part
     getConfig: () => fetch("/dev/config").then((r) => r.text()),
     saveConfig: (json) => fetch("/dev/config", { method: "POST", body: json }),
@@ -109,6 +111,7 @@
     },
     setBrightness: () => {},
     listSlides: () => fetch("/dev/slides").then((r) => r.json()),
+    listMedia: () => fetch("/dev/media").then((r) => r.json()),
   };
   window.kioskNative = { event: onCameraEvent, status: onCameraStatus, back: () => show("clock"), remote: onRemote };
 
@@ -1101,34 +1104,83 @@
   $("shot-close").addEventListener("click", closeShot);
 
   // --- alarm clock -------------------------------------------------------------
-  // It rings in rounds: the chosen sound for wake.seconds, a pause, and so on
-  // for wake.rounds rounds; then it gives up.
+  // An alarm rings its sound in rounds: for wake.seconds, a pause, and so on for
+  // wake.rounds rounds; then it gives up. Instead of the sound an alarm can play
+  // a YouTube link, or music or a video from the media folder: over and over,
+  // for wake.media_minutes. A picture from that folder is shown while the sound
+  // rings. If music or video does not start, the sound rings as usual.
   const SNOOZE_MIN = 5;
   const ROUND_PAUSE_MS = 20000;
+  const MEDIA_START_MS = 12000;   // music or video gets this long to start before the sound takes over
+  const MEDIA_KINDS = {
+    audio: ["mp3", "m4a", "aac", "ogg", "wav", "flac"],
+    video: ["mp4", "m4v", "webm"],
+    picture: ["jpg", "jpeg", "png", "webp", "gif"],
+  };
+  const YOUTUBE = "https://www.youtube.com";
   let ringing = false;
   let ringTimer = null;    // repeats the sound within a round
   let pauseTimer = null;   // waits between rounds
+  let mediaTimer = null;   // waits for music or video to start, then ends it
+  let lastRing = null;     // what rang last: Snooze rings it again
+  let tube = null;         // the YouTube player while it is on: { frame, how, hello, playing }
   let rangAt = "";         // the minute that already rang, so it rings once
   let snoozeUntil = 0;
 
   function checkClockAlarms() {
-    if (ringing) return;
+    if (REMOTE || ringing) return;
     if (snoozeUntil && Date.now() >= snoozeUntil) { ring(); return; }
     const now = new Date();
     const hhmm = pad(now.getHours()) + ":" + pad(now.getMinutes());
     const minute = now.toDateString() + hhmm;
     if (minute === rangAt) return;
     const weekday = now.getDay() >= 1 && now.getDay() <= 5;
-    const due = cfg.clock_alarms.some((a) => a.on && a.time === hhmm
-      && (a.days === "all" || (a.days === "weekdays" ? weekday : !weekday)));
-    if (!due) return;
+    const fits = { all: true, once: true, weekdays: weekday, weekend: !weekday };
+    const due = cfg.clock_alarms.filter((a) => a.on && a.time === hhmm && fits[a.days]);
+    if (!due.length) return;
     rangAt = minute;
-    ring();
+    const once = due.filter((a) => a.days === "once");
+    if (once.length) {   // a one-time alarm has done its job: it switches itself off
+      once.forEach((a) => { a.on = false; });
+      native.saveConfig(JSON.stringify(cfg));
+    }
+    ring(due[0]);
   }
 
-  function ring(how) {   // how: { sound, seconds, rounds }; the saved settings unless testing
-    how = how || cfg.wake;
-    const sound = SOUNDS[how.sound] || SOUNDS.chime;
+  function mediaKind(name) {
+    const ext = String(name || "").split(".").pop().toLowerCase();
+    return Object.keys(MEDIA_KINDS).find((kind) => MEDIA_KINDS[kind].includes(ext)) || "";
+  }
+
+  function youtubeId(link) {
+    const found = /(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/|\/live\/)([\w-]{11})/.exec(link || "");
+    return found ? found[1] : "";
+  }
+
+  // how: an alarm's { sound, media, youtube }; what it leaves out comes from
+  // wake. Without it, what rang last rings again (Snooze).
+  function ring(how) {
+    how = Object.assign({}, cfg.wake, how || lastRing);
+    stopRinging(0);
+    lastRing = how;
+    ringing = true;
+    const video = youtubeId(how.youtube), kind = video ? "youtube" : mediaKind(how.media);
+    $("wake").classList.toggle("with-media", kind !== "" && kind !== "audio");
+    $("wake").hidden = false;
+    if (kind === "youtube") playYoutube(video, how);
+    else if (kind === "audio" || kind === "video") playFile(kind, how);
+    else {
+      if (kind === "picture") {
+        $("wake-img").src = "/media/" + encodeURIComponent(how.media);
+        $("wake-img").hidden = false;
+      }
+      ringSound(how);
+    }
+    updateMode();
+  }
+
+  function ringSound(how) {
+    const sound = SOUNDS[how.sound] || SOUNDS[cfg.wake.sound] || SOUNDS.chime;
     let round = 0;
     const startRound = () => {
       round++;
@@ -1141,16 +1193,85 @@
         else pauseTimer = setTimeout(startRound, ROUND_PAUSE_MS);
       }, sound.every * 1000);
     };
-    stopRinging(0);
-    ringing = true;
-    $("wake").hidden = false;
+    clearTimeout(mediaTimer);
+    clearInterval(ringTimer);
+    clearTimeout(pauseTimer);
     startRound();
-    updateMode();
   }
+
+  // Music or video is on: it goes round until Stop, Snooze or the time limit.
+  // The sound falls silent if it had already taken over.
+  function mediaStarted(how) {
+    clearInterval(ringTimer);
+    clearTimeout(pauseTimer);
+    clearTimeout(mediaTimer);
+    mediaTimer = setTimeout(() => stopRinging(0), Math.max(1, how.media_minutes) * 60000);
+  }
+
+  function playFile(kind, how) {
+    const player = $("wake-video");
+    player.hidden = kind !== "video";   // music plays unseen
+    player.loop = true;
+    player.onplaying = () => { player.onplaying = null; mediaStarted(how); };
+    player.onerror = () => ringSound(how);
+    player.src = "/media/" + encodeURIComponent(how.media);
+    mediaTimer = setTimeout(() => ringSound(how), MEDIA_START_MS);
+    player.play().catch(() => { if (ringing && lastRing === how && player.onplaying) ringSound(how); });
+  }
+
+  function playYoutube(id, how) {
+    const frame = el("iframe");
+    frame.allow = "autoplay; encrypted-media";
+    frame.referrerPolicy = "strict-origin-when-cross-origin";
+    frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-presentation");   // it cannot leave its frame
+    frame.src = YOUTUBE + "/embed/" + id + "?autoplay=1&playsinline=1&loop=1&playlist=" + id
+      + "&rel=0&enablejsapi=1&origin=" + encodeURIComponent(location.origin);
+    const mine = tube = { frame: frame, how: how, hello: null, playing: false };
+    // The player tells what it is doing once it has been spoken to; keep
+    // speaking until it answers.
+    frame.addEventListener("load", () => {
+      mine.hello = setInterval(() => say(mine, { event: "listening" }), 500);
+    });
+    $("wake-media").appendChild(frame);
+    mediaTimer = setTimeout(() => ringSound(how), MEDIA_START_MS);
+  }
+
+  function say(player, words) {
+    if (!player.frame.contentWindow) return;
+    player.frame.contentWindow.postMessage(JSON.stringify(Object.assign({ id: 1, channel: "widget" }, words)), YOUTUBE);
+  }
+
+  window.addEventListener("message", (message) => {
+    if (!tube || message.origin !== YOUTUBE || message.source !== tube.frame.contentWindow) return;
+    let said;
+    try { said = JSON.parse(message.data); } catch (e) { return; }
+    if (tube.hello) {   // it answers: ask to be told when it plays or fails
+      clearInterval(tube.hello);
+      tube.hello = null;
+      ["onStateChange", "onError"].forEach((name) => say(tube, { event: "command", func: "addEventListener", args: [name] }));
+    }
+    const state = said.event === "onStateChange" ? said.info : said.info && said.info.playerState;
+    if (said.event === "onError") ringSound(tube.how);   // not found, or not allowed outside YouTube
+    else if (state === 1 && !tube.playing) { tube.playing = true; mediaStarted(tube.how); }
+  });
 
   function stopRinging(snoozeMinutes) {
     clearInterval(ringTimer);
     clearTimeout(pauseTimer);
+    clearTimeout(mediaTimer);
+    const player = $("wake-video");
+    player.onplaying = player.onerror = null;
+    player.pause();
+    player.removeAttribute("src");
+    player.load();   // lets go of the file
+    player.hidden = true;
+    $("wake-img").hidden = true;
+    $("wake-img").removeAttribute("src");
+    if (tube) {
+      clearInterval(tube.hello);
+      tube.frame.remove();
+      tube = null;
+    }
     ringing = false;
     snoozeUntil = snoozeMinutes ? Date.now() + snoozeMinutes * 60000 : 0;
     $("wake").hidden = true;
@@ -1163,10 +1284,18 @@
 
   // --- settings (one tab per subject) ------------------------------------------
   const STREAMS = [["0", "Main stream"], ["1", "Sub stream 1"], ["2", "Sub stream 2"]];
-  const DAYS = [["all", "Every day"], ["weekdays", "Mon\u2013Fri"], ["weekend", "Sat\u2013Sun"]];
+  const DAYS = [["all", "Every day"], ["weekdays", "Mon\u2013Fri"], ["weekend", "Sat\u2013Sun"], ["once", "Today, once"]];
+  const SOUND_NAMES = Object.keys(SOUNDS).map((key) => [key, SOUNDS[key].name]);
+  const HINTS = {
+    Slideshow: "Pictures come from the slides folder on the PC: run sync-slides.bat, then tap Slides to load them.",
+    "Alarm clock": "Music, videos and pictures come from the media folder on the PC: run sync-media.bat. "
+      + "A YouTube link is played when given; a picture is shown while the sound rings.",
+  };
+  // Tabs of [setting, label, kind, conversion, button]; kind is an input type, a
+  // list of choices, or "media" (a file from the media folder); button is
+  // [label, action] for a button beside the field.
   const percent = { show: (v) => (v < 0 ? "" : Math.round(v * 100)), read: (s) => (s === "" ? -1 : Math.min(100, Math.max(0, +s)) / 100) };
   const number = { show: (v) => v, read: (s) => Math.max(0, +s || 0) };
-  // Tabs of [setting, label, kind, conversion]; kind is an input type or a list of choices.
   const SETTINGS = [
     ["General", [
       ["locale", "Date language", [["en-CA", "English"], ["fr-CA", "Fran\u00E7ais"], ["ru-RU", "\u0420\u0443\u0441\u0441\u043A\u0438\u0439"]]],
@@ -1222,13 +1351,16 @@
       ["slides.auto_stop", "Back to the clock at", "time"],
     ]],
     ["Alarm clock", [
-      ["wake.sound", "Sound", Object.keys(SOUNDS).map((key) => [key, SOUNDS[key].name])],
-      ["wake.seconds", "Ring for, s", "number", number],
+      ["wake.seconds", "Sound rings for, s", "number", number],
       ["wake.rounds", "Repeat, times (20 s apart)", "number", number],
+      ["wake.media_minutes", "Music or video plays for, min", "number", number],
     ].concat([0, 1, 2, 3].reduce((rows, i) => rows.concat([
-      ["clock_alarms." + i + ".on", "Alarm " + (i + 1), "checkbox"],
+      ["clock_alarms." + i + ".on", "Alarm " + (i + 1), "checkbox", null, ["Test", () => ringAsShown(i)]],
       ["clock_alarms." + i + ".time", "Time", "time"],
       ["clock_alarms." + i + ".days", "Days", DAYS],
+      ["clock_alarms." + i + ".sound", "Sound", SOUND_NAMES],
+      ["clock_alarms." + i + ".media", "Music, video or picture", "media"],
+      ["clock_alarms." + i + ".youtube", "or a YouTube link", "text"],
     ]), [])), "three"],
   ];
   const FIELDS = SETTINGS.reduce((all, tab) => all.concat(tab[1]), []);
@@ -1247,6 +1379,7 @@
     const form = $("settings-form"), tabs = $("settings-tabs");
     form.textContent = "";
     tabs.textContent = "";
+    const media = native.listMedia().catch(() => []);   // asked once for all the alarms
     SETTINGS.forEach((tab, index) => {
       const button = el("button", "", tab[0]);
       button.type = "button";
@@ -1254,25 +1387,36 @@
       tabs.appendChild(button);
       const box = el("fieldset", tab[2] || "");
       tab[1].forEach((field) => {
-        const path = field[0], kind = field[2], convert = field[3];
+        const path = field[0], kind = field[2], convert = field[3], action = field[4];
         const row = el("label", kind === "checkbox" ? "field check" : "field");
+        const value = pathGet(cfg, path);
         let input;
-        if (Array.isArray(kind)) {
+        if (Array.isArray(kind) || kind === "media") {
           input = el("select");
-          kind.forEach((option) => { input.appendChild(el("option", "", option[1])).value = option[0]; });
+          // A file is listed from the start if it is the chosen one, even when the folder no longer has it.
+          const choices = kind === "media" ? [["", "None"]].concat(value ? [[value, value]] : []) : kind;
+          choices.forEach((option) => { input.appendChild(el("option", "", option[1])).value = option[0]; });
+          if (kind === "media") {
+            media.then((names) => names.forEach((name) => { if (name !== value) input.appendChild(el("option", "", name)).value = name; }));
+          }
         } else {
           input = el("input");
           input.type = kind;
           input.autocomplete = "off";
           input.spellcheck = false;
         }
-        const value = pathGet(cfg, path);
         if (kind === "checkbox") input.checked = !!value;
         else input.value = convert ? convert.show(value) : value == null ? "" : value;
         input.dataset.path = path;
         if (REMOTE && kind === "color") input.addEventListener("input", () => sendPreview(path, input.value));
         if (REMOTE && (kind === "password" || path === "remote_pin")) input.placeholder = "unchanged";   // never sent out
         row.append(el("span", "", field[1]), input);
+        if (action) {
+          const button = el("button", "field-action", action[0]);
+          button.type = "button";
+          button.addEventListener("click", action[1]);
+          row.appendChild(button);
+        }
         box.appendChild(row);
       });
       form.appendChild(box);
@@ -1283,9 +1427,8 @@
   function showSettingsTab() {
     Array.from($("settings-tabs").children).forEach((b, i) => b.classList.toggle("active", i === settingsTab));
     Array.from($("settings-form").children).forEach((box, i) => { box.hidden = i !== settingsTab; });
-    $("settings-hint").hidden = SETTINGS[settingsTab][0] !== "Slideshow";
+    $("settings-hint").textContent = HINTS[SETTINGS[settingsTab][0]] || "";
     $("settings-test").hidden = SETTINGS[settingsTab][0] !== "Cameras";
-    $("settings-ring").hidden = SETTINGS[settingsTab][0] !== "Alarm clock";
     const address = native.remoteAddress ? native.remoteAddress() : "";
     $("settings-remote").textContent = !address ? ""
       : cfg.remote_pin ? "Remote control from a PC or phone on this Wi-Fi: " + address
@@ -1321,12 +1464,16 @@
     onCameraEvent({ cam: chosen, code: TEST_CODE, action: "Pulse", index: 0 });
   }
   $("settings-test").addEventListener("click", () => (REMOTE ? command({ test: true }) : testAlarm()));
-  // Test the alarm clock with what the form shows now, saved or not.
-  $("settings-ring").addEventListener("click", () => {
-    const pickFrom = (path) => $("settings-form").querySelector('[data-path="' + path + '"]').value;
-    const how = { sound: pickFrom("wake.sound"), seconds: +pickFrom("wake.seconds"), rounds: +pickFrom("wake.rounds") };
+  // Test one alarm with what the form shows now, saved or not.
+  function ringAsShown(i) {
+    const shown = (path) => $("settings-form").querySelector('[data-path="' + path + '"]').value.trim();
+    const alarm = "clock_alarms." + i + ".";
+    const how = {
+      sound: shown(alarm + "sound"), media: shown(alarm + "media"), youtube: shown(alarm + "youtube"),
+      seconds: +shown("wake.seconds"), rounds: +shown("wake.rounds"), media_minutes: +shown("wake.media_minutes"),
+    };
     if (REMOTE) command({ ring: how }); else ring(how);
-  });
+  }
   $("settings-stop").hidden = !REMOTE;
   $("settings-stop").addEventListener("click", () => command({ stop: true }));
 
@@ -1336,6 +1483,8 @@
       const saved = await native.getConfig();
       if (saved) cfg = merge(BASE, JSON.parse(saved));
     } catch (e) { /* first run, or unreadable settings: defaults */ }
+    // Alarms saved before each had its own sound and media get them now.
+    cfg.clock_alarms = cfg.clock_alarms.map((a) => Object.assign({ media: "", youtube: "" }, a, { sound: a.sound || cfg.wake.sound }));
     const root = document.documentElement.style;
     root.setProperty("--night", cfg.night.color);
     root.setProperty("--day", cfg.day.color);

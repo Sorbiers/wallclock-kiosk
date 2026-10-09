@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 
         cameras = new Cameras(this::runInPage);
-        web.setWebViewClient(new PageClient(getAssets(), cameras, slides()));
+        web.setWebViewClient(new PageClient(getAssets(), cameras, slides(), media()));
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(web);
         web.loadUrl(PAGE);
@@ -144,6 +144,24 @@ public class MainActivity extends Activity {
         return getExternalFilesDir("slides");
     }
 
+    /** What the alarm clock can play or show (sync-media.bat), next to the slides: .../files/media */
+    private File media() {
+        return getExternalFilesDir("media");
+    }
+
+    /** The names of the pictures, or of everything playable, in one of those folders, as a JSON list. */
+    private static String names(File folder, boolean picturesOnly) {
+        JSONArray names = new JSONArray();
+        String[] found = folder == null ? null : folder.list();
+        if (found != null) {
+            Arrays.sort(found);
+            for (String name : found) {
+                if (picturesOnly ? PageClient.isPicture(name) : PageClient.isMedia(name)) names.put(name);
+            }
+        }
+        return names.toString();
+    }
+
     /** What the remote-control page (another device's browser) may do. */
     private final class RemoteHost implements Remote.Host {
         @Override
@@ -180,6 +198,11 @@ public class MainActivity extends Activity {
             } catch (JSONException rejected) {
                 // not settings: ignore
             }
+        }
+
+        @Override
+        public String media() {
+            return names(MainActivity.this.media(), false);
         }
 
         @Override
@@ -231,15 +254,13 @@ public class MainActivity extends Activity {
         /** File names of the slideshow pictures, as a JSON list. */
         @JavascriptInterface
         public String listSlides() {
-            JSONArray names = new JSONArray();
-            String[] found = slides() == null ? null : slides().list();
-            if (found != null) {
-                Arrays.sort(found);
-                for (String name : found) {
-                    if (PageClient.isPicture(name)) names.put(name);
-                }
-            }
-            return names.toString();
+            return names(slides(), true);
+        }
+
+        /** File names of what the alarm clock can play or show, as a JSON list. */
+        @JavascriptInterface
+        public String listMedia() {
+            return names(media(), false);
         }
 
         /** Where the remote control is reached on the home network, or "" without Wi-Fi. */

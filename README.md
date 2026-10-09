@@ -24,7 +24,9 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
 - **Camera alarms** — when a camera's tripwire or intrusion rule fires, pictures
   from that camera appear over whatever is showing, with an optional short beep.
   Upright, the camera also plays live underneath.
-- **Alarm clock** — four alarms with a choice of sounds, Snooze and Stop.
+- **Alarm clock** — four alarms, daily, on weekdays, at weekends or just once;
+  each rings a sound of its own choice or plays a YouTube link, music or a video
+  from the tablet, or shows a picture. Snooze and Stop.
 - **Night mode** — its own colour and backlight, by the clock or when the room
   is dark (light sensor).
 - **Remote control** — a page served by the tablet itself (`http://<tablet>:8080`)
@@ -61,11 +63,12 @@ script calls the SDK tools directly.
 | `build.bat [--debug]` | Builds `dist\wallclock.apk`; `--debug` makes the page inspectable over USB (chrome://inspect) |
 | `deploy.bat` | Installs it on the tablet and starts it; settings on the tablet are kept |
 | `sync-slides.bat [folder]` | Copies the slideshow pictures (default: `slides\`) to the tablet, shrunk to tablet size |
-| `wifi-on.bat` | Lets the two scripts above reach the tablet over Wi-Fi, without the cable |
+| `sync-media.bat [folder]` | Copies what the alarm clock can play (default: `media\`): music, videos, pictures |
+| `wifi-on.bat` | Lets the scripts above reach the tablet over Wi-Fi, without the cable |
 | `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet; pictures and live view are real |
 | `serve.bat [port]` | Shows the page in a desktop browser for development |
 
-`deploy.bat` and `sync-slides.bat` go by USB cable when the tablet is plugged in
+`deploy.bat` and the two sync scripts go by USB cable when the tablet is plugged in
 (USB debugging on). To do without the cable, run `wifi-on.bat` once with the
 cable in; the tablet forgets that when it restarts. While it is on, the tablet's
 debug port is open on your network to the computers it has already allowed.

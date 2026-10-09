@@ -28,6 +28,7 @@ from dotenv import dotenv_values
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
 SLIDES_DIR = ROOT / "slides"   # the PC copy of the slideshow pictures
+MEDIA_DIR = ROOT / "media"     # the PC copy of what the alarm clock plays
 ENV_FILE = Path(os.environ.get("WALLCLOCK_ENV") or ROOT / "dev" / "cameras.env")
 PORT = next((int(arg) for arg in sys.argv[1:] if arg.isdigit()), 8080)
 
@@ -108,6 +109,11 @@ async def slides(request: web.Request) -> web.Response:
     return web.json_response(sorted(p.name for p in SLIDES_DIR.iterdir() if p.suffix.lower() in pictures))
 
 
+async def media(request: web.Request) -> web.Response:
+    playable = (".mp3", ".m4a", ".aac", ".ogg", ".wav", ".flac", ".mp4", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp", ".gif")
+    return web.json_response(sorted(p.name for p in MEDIA_DIR.iterdir() if p.suffix.lower() in playable))
+
+
 async def events(request: web.Request) -> web.StreamResponse:
     dev = request.app["dev"]
     response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-store"})
@@ -179,6 +185,9 @@ def main() -> None:
     SLIDES_DIR.mkdir(exist_ok=True)
     app.router.add_get("/dev/slides", slides)
     app.router.add_static("/slides/", SLIDES_DIR)
+    MEDIA_DIR.mkdir(exist_ok=True)
+    app.router.add_get("/dev/media", media)
+    app.router.add_static("/media/", MEDIA_DIR)
     app.router.add_static("/", WEB_DIR)
     logger.info("Page with stand-in native side on http://localhost:%d", PORT)
     try:

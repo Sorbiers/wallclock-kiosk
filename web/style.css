@@ -408,6 +408,19 @@ body.remote .settings-actions { flex-wrap: wrap; }
 .tabs button.active { background: #fff; color: #000; border-color: #fff; }
 .settings fieldset[hidden] { display: none; }
 .settings fieldset.three { grid-template-columns: 1fr 1fr 1fr; }
+.field .field-action {   /* a button beside a field (Test) */
+  margin-left: auto;
+  font: inherit;
+  font-size: 2.2vh;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #fff;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 99vh;
+  padding: 1vh 1.8vw;
+}
+.settings fieldset.three .field.check { margin-top: 1.6vh; }   /* each alarm starts a little apart */
 .field.check { flex-direction: row; align-items: center; gap: 1.4vw; font-size: 2.8vh; }
 .field.check input { order: -1; width: 4.4vh; height: 4.4vh; padding: 0; accent-color: #fff; }
 .settings-hint { margin-top: 2vh; font-size: 2.4vh; opacity: 0.6; }
@@ -451,6 +464,12 @@ body.remote .settings-actions { flex-wrap: wrap; }
   animation: wake-pulse 1.25s ease-in-out infinite alternate;
 }
 .wake[hidden] { display: none; }
+/* what the alarm plays or shows: inside the pulsing frame, behind the buttons */
+.wake.with-media { background: #000; }
+.wake-media { position: absolute; inset: 1.2vh; }
+.wake-media > * { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: contain; background: #000; }
+.wake-media > [hidden] { display: none; }
+.wake-label, .wake-actions { position: relative; text-shadow: 0 0 1.4vh #000; }
 @keyframes wake-pulse { to { box-shadow: inset 0 0 0 0.4vh #fff; } }
 .wake-label { font-size: 5vh; letter-spacing: 0.4em; text-indent: 0.4em; text-transform: uppercase; }
 .wake-actions { display: flex; gap: 4vw; }
@@ -512,6 +531,7 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .field input, .field select { font-size: 4.2vw; padding: 1vh 2vw; }
   .field.check { font-size: 3.6vw; }
   .field.check input { width: 6vw; height: 6vw; }
+  .field .field-action { font-size: 2.6vw; padding: 0.8vh 2.6vw; }
   .settings-hint { font-size: 3vw; }
   .settings-actions { flex-wrap: wrap; }
   .settings-actions button { font-size: 3.4vw; padding: 1.6vh 5vw; }
