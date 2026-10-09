@@ -4,30 +4,22 @@ The folder (default: slides/) is mirrored to the Wall Clock app on the tablet:
 new and changed pictures are copied, pictures no longer in the folder are
 removed. Pictures are first shrunk to tablet size into dist/slides (the
 originals are never touched), so a phone photo costs the tablet ~300 KB, not 5 MB.
-Needs the tablet plugged in with USB debugging on.
+Goes by USB cable when the tablet is plugged in, else over Wi-Fi (see tablet.py).
 """
 
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 from PIL import Image, ImageOps
 
+import tablet
+
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "slides"
 SHRUNK = ROOT / "dist" / "slides"
-ADB = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or Path.home() / "AppData/Local/Android/Sdk") / "platform-tools" / "adb.exe"
 ON_TABLET = "/sdcard/Android/data/home.wallclock/files"   # the app's own folder; "slides" goes inside
 PICTURES = (".jpg", ".jpeg", ".png", ".webp")
 FIT = (1920, 1200)   # plenty for the 1340x800 screen, with room for the slow zoom
-
-
-def adb(*args) -> str:
-    done = subprocess.run([str(ADB), *args], capture_output=True, text=True)
-    if done.returncode:
-        sys.exit(f"adb {args[0]} failed: {(done.stderr or done.stdout).strip() or 'is the tablet plugged in?'}")
-    return done.stdout
 
 
 def main() -> None:
@@ -51,6 +43,12 @@ def main() -> None:
         if stale.name not in wanted:
             stale.unlink()
 
+    device = tablet.find()
+
+    def adb(*args) -> str:
+        return tablet.adb(device, *args)
+
+    print("Copying to the tablet", "over Wi-Fi..." if ":" in device else "by cable...")
     adb("shell", "mkdir", "-p", f"{ON_TABLET}/slides")
     for name in adb("shell", "ls", f"{ON_TABLET}/slides").split("\n"):
         name = name.strip()

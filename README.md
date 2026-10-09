@@ -57,10 +57,16 @@ script calls the SDK tools directly.
 | Script | Does |
 |---|---|
 | `build.bat [--debug]` | Builds `dist\wallclock.apk`; `--debug` makes the page inspectable over USB (chrome://inspect) |
-| `deploy.bat` | Installs it over USB (USB debugging on) and starts it; settings on the tablet are kept |
+| `deploy.bat` | Installs it on the tablet and starts it; settings on the tablet are kept |
 | `sync-slides.bat [folder]` | Copies the slideshow pictures (default: `slides\`) to the tablet, shrunk to tablet size |
+| `wifi-on.bat` | Lets the two scripts above reach the tablet over Wi-Fi, without the cable |
 | `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet; pictures and live view are real |
 | `serve.bat [port]` | Shows the page in a desktop browser for development |
+
+`deploy.bat` and `sync-slides.bat` go by USB cable when the tablet is plugged in
+(USB debugging on). To do without the cable, run `wifi-on.bat` once with the
+cable in; the tablet forgets that when it restarts. While it is on, the tablet's
+debug port is open on your network to the computers it has already allowed.
 
 Machine-specific paths go in `local.bat` (see `local.example.bat`). The first
 build creates a signing key, `android/wallclock.keystore`; keep it, because an
