@@ -15,6 +15,8 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   when the weather is about to change. Upright, the hours stack over the minutes.
 - **Camera** — live video straight from the cameras; a tap steps through all
   cameras and each one alone.
+- **Events** — the camera alarms of the last 24 hours with their pictures; a tap
+  opens a picture full screen.
 - **Weather** — now, the next 24 hours and 7 days (Open-Meteo; in Canada the
   current conditions come from an Environment Canada station).
 - **Slides** — a slideshow of your own pictures, optionally on a daily schedule

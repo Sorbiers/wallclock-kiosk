@@ -99,7 +99,7 @@ body.night .seg.on.rest { opacity: 0.3; }
 
 /* --- weather view ------------------------------------------------------ */
 #view-weather { padding: 4vh 4vw 3vh; }
-.wx-place { font-size: 2.4vh; letter-spacing: 0.2em; text-transform: uppercase; opacity: var(--soft); }
+.wx-place, .ev-title { font-size: 2.4vh; letter-spacing: 0.2em; text-transform: uppercase; opacity: var(--soft); }
 
 .wx-now {
   flex: 1;
@@ -281,7 +281,7 @@ body.night .seg.on.rest { opacity: 0.3; }
   background: linear-gradient(rgba(0, 0, 0, 0.85), transparent);
 }
 .alarm-tag { padding: 0.5vh 1.2vw; background: var(--alarm); font-weight: 700; }
-#alarm-count { margin-left: auto; }
+#alarm-count, #shot-count { margin-left: auto; }
 .alarm-cancel {
   position: absolute;
   right: 3vw;
@@ -297,6 +297,46 @@ body.night .seg.on.rest { opacity: 0.3; }
   border-radius: 99vh;
   padding: 2.6vh 4.2vw;
 }
+
+/* --- camera alarms of the last 24 hours: a list, and one picture full screen -- */
+#view-events { padding: 4vh 4vw 0; opacity: 1; }
+.ev-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16vh; scrollbar-width: none; }   /* room for the buttons */
+.ev {
+  display: grid;
+  grid-template-columns: 21vw 1fr;
+  gap: 3vw;
+  align-items: center;
+  padding: 2.4vh 0;
+  border-top: 1px solid var(--rule);
+}
+.ev-time { font-size: 7.4vh; font-weight: 300; line-height: 1; }
+.ev-cam { margin-top: 1.4vh; font-size: 2.8vh; letter-spacing: 0.2em; text-transform: uppercase; }
+.ev-what { margin-top: 0.6vh; font-size: 2.1vh; letter-spacing: 0.14em; text-transform: uppercase; opacity: var(--soft); }
+.ev-strip { display: flex; gap: 1vw; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ev-strip img { flex: none; height: 19vh; aspect-ratio: 16 / 9; object-fit: cover; background: #111; }
+.ev-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 12vw; font-size: 3.4vh; text-align: center; opacity: 0.7; }
+.ev-empty[hidden] { display: none; }
+
+.shot { position: fixed; inset: 0; z-index: 9; background: #000; color: #fff; }
+.shot[hidden] { display: none; }
+#shot-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.shot-step {   /* the left and right thirds of the picture step through the alarm */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 32%;
+  font: inherit;
+  font-size: 14vh;
+  font-weight: 200;
+  color: #fff;
+  background: none;
+  border: 0;
+  opacity: 0.75;
+  text-shadow: 0 0 2vh #000;
+}
+.shot-step[hidden] { display: none; }
+#shot-prev { left: 0; text-align: left; padding-left: 3vw; }
+#shot-next { right: 0; text-align: right; padding-right: 3vw; }
 
 /* --- settings: a plain form, never dimmed ----------------------------------- */
 #view-settings { opacity: 1; color: #fff; overflow-y: auto; }
@@ -345,7 +385,7 @@ body.remote .nav {
   pointer-events: auto;
   transform: none;
 }
-body.remote .nav button { font-size: min(2.9vh, 3.8vw); letter-spacing: 0.1em; text-indent: 0; padding: 2.2vh 2vw; }
+body.remote .nav button { font-size: min(2.9vh, 3.2vw); letter-spacing: 0.1em; text-indent: 0; padding: 2.2vh 1.5vw; }
 body.remote .nav button[data-view="settings"], body.remote .status { display: none; }
 body.remote .settings-actions { flex-wrap: wrap; }
 @media (max-width: 700px) {
@@ -438,7 +478,7 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .head { flex-direction: column; align-items: flex-start; gap: 1.6vh; padding-bottom: 2vh; }
   .head .digits { height: 9vh; }
   .head .dateline { font-size: 4.2vw; }
-  .wx-place { font-size: 2.6vw; }
+  .wx-place, .ev-title { font-size: 2.6vw; }
 
   .wx-now { flex-wrap: wrap; align-content: center; gap: 1vh 4vw; padding: 2vh 0; }
   .wx-now .emoji { font-size: 9vh; }
@@ -455,7 +495,7 @@ body.remote .settings-actions { flex-wrap: wrap; }
   #view-camera .head { padding: 3vh 4vw 0; }
   .cams { grid-template-columns: 1fr; align-content: center; }   /* cameras one above the other */
 
-  .nav button { font-size: 2.7vw; letter-spacing: 0.12em; text-indent: 0.12em; padding: 1.6vh 2.6vw; }
+  .nav button { font-size: 2.7vw; letter-spacing: 0.12em; text-indent: 0.12em; padding: 1.6vh 1.8vw; }
   .status { font-size: 2.6vw; }
 
   .alarm-top { flex-wrap: wrap; font-size: 3.4vw; padding: 2vh 4vw 4vh; }
@@ -475,6 +515,17 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .settings-hint { font-size: 3vw; }
   .settings-actions { flex-wrap: wrap; }
   .settings-actions button { font-size: 3.4vw; padding: 1.6vh 5vw; }
+
+  #view-events { padding: 3vh 4vw 0; }
+  .ev { grid-template-columns: 1fr; gap: 1.4vh; padding: 1.8vh 0; }
+  .ev-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 3vw; }
+  .ev-time { font-size: 8vw; }
+  .ev-cam { margin: 0; font-size: 3.4vw; }
+  .ev-what { margin: 0; font-size: 2.6vw; }
+  .ev-strip { gap: 1.6vw; }
+  .ev-strip img { height: 11vh; }
+  .ev-empty { font-size: 4.4vw; }
+  .shot-step { font-size: 16vw; }
 
   .ss-clock { height: 7vh; }
   .ss-empty { font-size: 4.4vw; }

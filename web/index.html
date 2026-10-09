@@ -24,6 +24,18 @@
   <div class="cams" id="cams"></div>
 </main>
 
+<main id="view-events" class="view" hidden>
+  <header class="head">
+    <div class="digits" id="ev-digits"></div>
+    <div class="headtext">
+      <div class="dateline" id="ev-date"></div>
+      <div class="ev-title" id="ev-title"></div>
+    </div>
+  </header>
+  <div class="ev-list" id="ev-list"></div>
+  <div class="ev-empty" id="ev-empty" hidden>No camera alarms in the last 24 hours.</div>
+</main>
+
 <main id="view-weather" class="view" hidden>
   <header class="head">
     <div class="digits" id="wx-digits"></div>
@@ -64,6 +76,7 @@
 <nav id="nav" class="nav">
   <button type="button" data-view="clock">Clock</button>
   <button type="button" data-view="camera">Camera</button>
+  <button type="button" data-view="events">Events</button>
   <button type="button" data-view="weather">Weather</button>
   <button type="button" data-view="slides">Slides</button>
   <button type="button" data-view="settings" aria-label="Settings">&#9881;</button>
@@ -77,6 +90,17 @@
     <button type="button" id="wake-snooze">Snooze 5 min</button>
     <button type="button" id="wake-stop" class="primary">Stop</button>
   </div>
+</div>
+
+<div id="shot" class="shot" hidden>
+  <img id="shot-img" alt="">
+  <button type="button" id="shot-prev" class="shot-step" aria-label="Previous picture">&#8249;</button>
+  <button type="button" id="shot-next" class="shot-step" aria-label="Next picture">&#8250;</button>
+  <div class="alarm-top">
+    <span id="shot-caption"></span>
+    <span id="shot-count"></span>
+  </div>
+  <button type="button" id="shot-close" class="alarm-cancel">Close</button>
 </div>
 
 <div id="alarm" class="alarm" hidden>

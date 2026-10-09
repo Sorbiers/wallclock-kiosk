@@ -15,7 +15,7 @@
   // Opened in another device's browser (served by the tablet, see Remote.java):
   // only the mode buttons and the settings, acting on the tablet.
   const REMOTE = document.body.classList.contains("remote");
-  const VIEWS = ["clock", "camera", "weather", "slides", "settings"];
+  const VIEWS = ["clock", "camera", "events", "weather", "slides", "settings"];
   const DAY_PEEK_MS = 5000;   // a tap at night shows day mode for this long
   const TEST_CODE = "Test";
   const EVENT_LABELS = {
@@ -23,6 +23,7 @@
     CrossRegionDetection: "Zone intrusion",
     Test: "Test alarm",
   };
+  const labelOf = (codes) => codes.map((code) => EVENT_LABELS[code] || code).join(" + ");
 
   const DEFAULTS = {
     locale: "en-CA",
@@ -275,7 +276,7 @@
   }
 
   // --- clock, date, day / night ---------------------------------------------
-  const clocks = ["clock", "cam", "wx", "ss"].map((name) => buildDigits($(name + "-digits")));
+  const clocks = ["clock", "cam", "wx", "ss", "ev"].map((name) => buildDigits($(name + "-digits")));
   // Upright tablet: the main clock stacks; the small header clocks stay in a row.
   const upright = window.matchMedia("(orientation: portrait)");
   const arrangeClock = () => clocks[0].arrange(upright.matches);
@@ -317,11 +318,12 @@
   }
 
   // Night mode (dim violet, low backlight) gives way to day mode whenever the
-  // screen is being used: settings, an alarm, or the seconds after a tap.
+  // screen is being used: settings, the events list, an alarm, or the seconds
+  // after a tap.
   // The backlight, by priority: the slideshow's own setting, then full light
   // while in use, then the night level or the room light.
   function updateMode() {
-    const inUse = view === "settings" || alarm.open || ringing || Date.now() - lastTouch < DAY_PEEK_MS;
+    const inUse = view === "settings" || view === "events" || alarm.open || ringing || Date.now() - lastTouch < DAY_PEEK_MS;
     night = previewMode ? previewMode === "night" : isNight(new Date()) && !inUse;
     document.body.classList.toggle("night", night);
     const slideLight = night ? cfg.slides.brightness_night : cfg.slides.brightness_day;   // the slideshow's own backlight
@@ -357,7 +359,7 @@
     clocks.forEach((c) => c.set(hhmm));
     const weekday = new Intl.DateTimeFormat(cfg.locale, { weekday: "long" }).format(now);
     const date = new Intl.DateTimeFormat(cfg.locale, { day: "numeric", month: "long" }).format(now);
-    ["clock", "cam", "wx"].forEach((name) => { $(name + "-date").textContent = weekday + " \u00B7 " + date; });
+    ["clock", "cam", "wx", "ev"].forEach((name) => { $(name + "-date").textContent = weekday + " \u00B7 " + date; });
   }
 
   // --- views and their buttons --------------------------------------------
@@ -372,6 +374,7 @@
     if (name === "camera") playCameras(); else stopCameras();
     if (name === "slides") startSlides(); else stopSlides();
     if (name === "settings") fillSettings();
+    if (name === "events") renderEvents(); else closeEvents();
     lastTouch = Date.now();
     updateMode();
   }
@@ -384,7 +387,7 @@
 
   function checkIdle() {
     if (REMOTE) return;
-    const minutes = { camera: cfg.views.camera_timeout_minutes, weather: cfg.views.weather_timeout_minutes, settings: 10 }[view];
+    const minutes = { camera: cfg.views.camera_timeout_minutes, weather: cfg.views.weather_timeout_minutes, settings: 10, events: 10 }[view];
     if (minutes && Date.now() - lastTouch > minutes * 60000) show("clock");
   }
 
@@ -841,7 +844,9 @@
       try {
         const r = await fetch("/cam/" + index + "/snapshot.jpg?t=" + started, { cache: "no-store" });
         if (!r.ok) throw new Error(r.status);
-        ev.pictures.push(URL.createObjectURL(await r.blob()));
+        const picture = await r.blob();
+        ev.pictures.push(URL.createObjectURL(picture));
+        keepShot(ev, picture);        // for the Events page; the alarm does not wait for it
         onAlarm(ev);
       } catch (e) { failures++; }
       if (!state.active.size && ev.pictures.length >= a.min_pictures) break;
@@ -882,7 +887,7 @@
     const ev = pic ? pic.ev : Array.from(alarm.events).pop();
     if (!ev) return;
     syncAlarmLive(ev.cam);
-    const label = ev.codes.map((code) => EVENT_LABELS[code] || code).join(" + ");
+    const label = labelOf(ev.codes);
     $("alarm-caption").textContent = ev.name + " · " + label + " · " + ev.time;
     $("alarm-count").textContent = pic ? (alarm.idx + 1) + " / " + alarm.pics.length : "";
   }
@@ -952,6 +957,7 @@
     syncAlarmLive(-1);
     lastTouch = Date.now();
     updateMode();
+    if (view === "events") renderEvents();   // with what this alarm added
   }
 
   $("alarm-cancel").addEventListener("click", () => closeAlarm(true));
@@ -961,6 +967,138 @@
     $("status").textContent = offline.map((cam) => cam.name + " offline").join(" · ");
     $("status").hidden = !offline.length;
   }
+
+  // --- camera events of the last 24 hours -------------------------------------
+  // Every alarm picture is also kept on this device (IndexedDB), shrunk to
+  // screen size plus a thumbnail, and dropped a day later. The Events page
+  // lists the alarms, newest first; a tap on a picture opens it full screen.
+  const HISTORY_MS = 24 * 3600 * 1000;
+  const SHOT_WIDTH = 1280, THUMB_WIDTH = 360;
+  let shotsOpening = null;
+
+  function shotsDb() {
+    if (!shotsOpening) {
+      shotsOpening = new Promise((done, fail) => {
+        const opening = indexedDB.open("wallclock", 1);
+        opening.onupgradeneeded = () => opening.result.createObjectStore("shots", { autoIncrement: true }).createIndex("at", "at");
+        opening.onsuccess = () => done(opening.result);
+        opening.onerror = () => fail(opening.error);
+      });
+    }
+    return shotsOpening;
+  }
+
+  function scaled(bitmap, width) {   // a JPEG of the picture, no wider than `width`
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, width / bitmap.width);
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const pen = canvas.getContext("2d");
+    pen.imageSmoothingQuality = "high";
+    pen.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return new Promise((done) => canvas.toBlob(done, "image/jpeg", 0.8));
+  }
+
+  async function keepShot(ev, picture) {
+    try {
+      const bitmap = await createImageBitmap(picture);
+      const shot = {
+        event: ev.id, at: Date.now(), cam: ev.cam, name: ev.name, codes: ev.codes.slice(),
+        picture: (await scaled(bitmap, SHOT_WIDTH)) || picture, thumb: (await scaled(bitmap, THUMB_WIDTH)) || picture,
+      };
+      bitmap.close();
+      const store = (await shotsDb()).transaction("shots", "readwrite").objectStore("shots");
+      store.add(shot);
+      store.index("at").openCursor(IDBKeyRange.upperBound(Date.now() - HISTORY_MS)).onsuccess = (found) => {
+        const cursor = found.target.result;   // older than a day: gone
+        if (cursor) { cursor.delete(); cursor.continue(); }
+      };
+      store.transaction.oncomplete = () => { if (view === "events" && !alarm.open) renderEvents(); };
+    } catch (e) { /* no history on this device; the alarm itself is not affected */ }
+  }
+
+  async function loadEvents() {   // one list of pictures per alarm, the newest alarm first
+    const index = (await shotsDb()).transaction("shots").objectStore("shots").index("at");
+    const shots = await new Promise((done, fail) => {
+      const asked = index.getAll(IDBKeyRange.lowerBound(Date.now() - HISTORY_MS));
+      asked.onsuccess = () => done(asked.result);
+      asked.onerror = () => fail(asked.error);
+    });
+    const byAlarm = new Map();
+    shots.forEach((one) => byAlarm.set(one.event, (byAlarm.get(one.event) || []).concat(one)));
+    return Array.from(byAlarm.values()).reverse();
+  }
+
+  const thumbUrls = [];   // object URLs of the thumbnails on the page
+  const shot = { list: [], idx: 0, url: null };   // the picture opened full screen
+
+  async function renderEvents() {
+    let alarms = [];
+    try { alarms = await loadEvents(); } catch (e) { /* no history on this device */ }
+    if (view !== "events") return;
+    const list = $("ev-list"), today = new Date().toDateString();
+    thumbUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
+    list.textContent = "";
+    $("ev-empty").hidden = alarms.length > 0;
+    $("ev-title").textContent = "Camera alarms \u00B7 last 24 hours" + (alarms.length ? " \u00B7 " + alarms.length : "");
+    alarms.forEach((shots) => {
+      const when = new Date(shots[0].at);
+      const meta = el("div", "ev-meta");
+      meta.append(
+        el("div", "ev-time", pad(when.getHours()) + ":" + pad(when.getMinutes())),
+        el("div", "ev-cam", shots[0].name),
+        el("div", "ev-what", (when.toDateString() === today ? "" : "Yesterday \u00B7 ") + labelOf(shots[shots.length - 1].codes)));
+      const strip = el("div", "ev-strip");
+      shots.forEach((one, i) => {
+        const img = el("img");
+        img.alt = "";
+        img.loading = "lazy";
+        thumbUrls.push(img.src = URL.createObjectURL(one.thumb));
+        img.addEventListener("click", () => openShot(shots, i));
+        strip.appendChild(img);
+      });
+      const row = el("article", "ev");
+      row.append(meta, strip);
+      list.appendChild(row);
+    });
+  }
+
+  function openShot(shots, i) {
+    shot.list = shots;
+    $("shot-prev").hidden = $("shot-next").hidden = shots.length < 2;
+    $("shot").hidden = false;
+    showShot(i);
+  }
+
+  function showShot(i) {   // steps round within the one alarm
+    const n = shot.list.length;
+    shot.idx = (i + n) % n;
+    const one = shot.list[shot.idx], when = new Date(one.at);
+    if (shot.url) URL.revokeObjectURL(shot.url);
+    shot.url = URL.createObjectURL(one.picture);
+    $("shot-img").src = shot.url;
+    $("shot-caption").textContent = one.name + " \u00B7 " + labelOf(one.codes) + " \u00B7 "
+      + pad(when.getHours()) + ":" + pad(when.getMinutes()) + ":" + pad(when.getSeconds());
+    $("shot-count").textContent = (shot.idx + 1) + " / " + n;
+  }
+
+  function closeShot() {
+    $("shot").hidden = true;
+    $("shot-img").removeAttribute("src");
+    if (shot.url) URL.revokeObjectURL(shot.url);
+    shot.url = null;
+    shot.list = [];
+  }
+
+  function closeEvents() {   // leaving the page: let go of its pictures
+    closeShot();
+    thumbUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
+    $("ev-list").textContent = "";
+  }
+
+  $("shot-prev").addEventListener("click", () => showShot(shot.idx - 1));
+  $("shot-next").addEventListener("click", () => showShot(shot.idx + 1));
+  $("shot-close").addEventListener("click", closeShot);
 
   // --- alarm clock -------------------------------------------------------------
   // It rings in rounds: the chosen sound for wake.seconds, a pause, and so on
