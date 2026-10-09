@@ -134,9 +134,10 @@ final class Remote extends Thread {
                 send(out, 404, "text/plain", new byte[0]);
                 return;
             }
-            if (file.equals("index.html")) {   // tells the page it is the remote control
+            if (file.equals("index.html")) {   // tells the page it is the remote control; there it may be zoomed
                 content = new String(content, StandardCharsets.UTF_8)
-                        .replace("<body>", "<body class=\"remote\">").getBytes(StandardCharsets.UTF_8);
+                        .replace("<body>", "<body class=\"remote\">").replace(", user-scalable=no", "")
+                        .getBytes(StandardCharsets.UTF_8);
             }
             send(out, 200, PageClient.mimeType(file), content);
         }
