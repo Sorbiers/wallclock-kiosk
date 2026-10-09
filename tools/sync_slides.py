@@ -60,7 +60,7 @@ def main() -> None:
     summary = adb("push", "--sync", str(SHRUNK), ON_TABLET).strip().splitlines()
     if summary:
         print(summary[-1])
-    print(f"{len(wanted)} picture(s) on the tablet. Open Slides there to see them.")
+    print(f"{len(wanted)} picture(s) on the tablet. Tap Slides there to load them, also if the slideshow is already running.")
 
 
 if __name__ == "__main__":

@@ -90,6 +90,8 @@
     listSlides: async () => JSON.parse(window.Android.listSlides()),
     remoteAddress: () => window.Android.remoteAddress(),
     lux: () => window.Android.lux(),   // room light from the tablet's sensor; below 0 = no sensor
+    clearCache: () => window.Android.clearCache(),
+    restart: () => window.Android.restart(),
   } : REMOTE ? {
     getConfig: () => api("/api/config"),
     saveConfig: (json) => api("/api/config", json),
@@ -171,6 +173,7 @@
     if (what.test) testAlarm(what.cam);
     if (what.ring) ring(what.ring);
     if (what.preview) preview(what.preview);
+    if (what.restart && native.restart) native.restart();
     if (what.stop) {
       if (ringing) stopRinging(0);
       if (alarm.open) closeAlarm(true);
@@ -518,10 +521,15 @@
     ss.fading = false;
     $("ss-digits").hidden = !cfg.slides.clock;
     $("ss-empty").hidden = true;
+    // Every time Slides is opened the folder is read again: its content may
+    // have changed (sync-slides.bat). The pictures kept in memory are dropped,
+    // and a new address makes sure each one really comes from the folder.
+    if (native.clearCache) native.clearCache();
+    const fresh = "?v=" + Date.now();
     let names = [];
     try { names = await native.listSlides(); } catch (e) { /* treated as an empty folder */ }
     if (run !== ss.run) return;
-    ss.items = names.map((name) => "/slides/" + encodeURIComponent(name));
+    ss.items = names.map((name) => "/slides/" + encodeURIComponent(name) + fresh);
     ss.deck = [];
     $("ss-empty").hidden = ss.items.length > 0;
     if (ss.items.length) nextSlide(true);
@@ -1166,6 +1174,8 @@
   $("settings-save").addEventListener("click", saveSettings);
   $("settings-system").hidden = !native.openSystemSettings;
   $("settings-system").addEventListener("click", () => native.openSystemSettings());
+  $("settings-restart").hidden = !REMOTE && !native.restart;
+  $("settings-restart").addEventListener("click", () => (REMOTE ? command({ restart: true }) : native.restart()));
   function testAlarm(cam) {   // cam: position of the camera to pretend about; the first one if not given
     show("clock");
     const first = cfg.cameras.findIndex((camera) => camera.host);

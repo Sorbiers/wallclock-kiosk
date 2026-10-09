@@ -263,5 +263,20 @@ public class MainActivity extends Activity {
         public void openSystemSettings() {
             startActivity(new Intent(Settings.ACTION_SETTINGS));
         }
+
+        /** Forget the pictures the page keeps in memory, so the slideshow reads its folder again. */
+        @JavascriptInterface
+        public void clearCache() {
+            runOnUiThread(() -> web.clearCache(true));
+        }
+
+        /** Start the whole app afresh, in a new process. The settings stay. */
+        @JavascriptInterface
+        public void restart() {
+            runOnUiThread(() -> {
+                startActivity(Intent.makeRestartActivityTask(getComponentName()));
+                Runtime.getRuntime().exit(0);
+            });
+        }
     }
 }
