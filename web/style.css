@@ -298,6 +298,79 @@ body.night .seg.on.rest { opacity: 0.3; }
   padding: 2.6vh 4.2vw;
 }
 
+/* --- newspaper: money and fuel in small charts, the day in history, headlines ---
+   Read up close, so it is set like a paper: a masthead, rules, serif for the prose. */
+#view-news { padding: 4vh 4vw 0; overflow-y: auto; scrollbar-width: none; }
+.paper-line { display: flex; align-items: baseline; gap: 2vw; }
+.paper-name { font-family: "Noto Serif", Georgia, serif; font-style: italic; font-size: 4.4vh; white-space: nowrap; }
+.paper {
+  display: grid;
+  grid-template-columns: 57fr 43fr;
+  padding: 1.8vh 0 3vh;
+  border-top: 0.7vh double color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.paper h2 { margin-bottom: 1.3vh; font-size: 1.9vh; font-weight: 500; letter-spacing: 0.3em; text-transform: uppercase; opacity: var(--soft); }
+.paper-money { min-width: 0; padding-right: 2.6vw; }
+.paper-read { min-width: 0; padding-left: 2.6vw; border-left: 1px solid var(--rule); }
+.paper-read h2:not(:first-child) { margin-top: 1.6vh; padding-top: 1.6vh; border-top: 1px solid var(--rule); }
+.paper-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.3vh 1.1vw; }
+.card {
+  display: grid;
+  grid-template-areas: "name" "value" "move" "line";
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.2vh;
+  min-width: 0;
+  padding: 1.1vh 0.9vw 0.9vh;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 0.6vh;
+}
+.card-name { grid-area: name; font-size: 1.7vh; letter-spacing: 0.12em; text-transform: uppercase; opacity: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-value { grid-area: value; font-size: 3.5vh; font-weight: 300; white-space: nowrap; }
+.card-move { grid-area: move; min-height: 2.1vh; font-size: 1.7vh; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-note { grid-area: line; align-self: center; font-size: 1.9vh; opacity: var(--soft); }
+.card svg { grid-area: line; display: block; width: 100%; height: 7vh; margin-top: 0.4vh; overflow: visible; }
+.card path, .chart path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.up { color: #5fd38d; }
+.down { color: #ff7a6b; }
+body.night .up, body.night .down { color: inherit; }   /* no bright colours at night */
+.paper-foot { margin-top: 1.6vh; font-size: 2vh; letter-spacing: 0.06em; opacity: var(--soft); }
+.paper-read ol { padding: 0; list-style: none; font-family: "Noto Serif", Georgia, serif; }
+.paper-read li {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-bottom: 1.2vh;
+  font-size: 2.35vh;
+  line-height: 1.34;
+}
+.paper-past b { margin-right: 0.8vw; font-family: Roboto, system-ui, sans-serif; font-weight: 700; }
+.paper-news i { font-size: 0.86em; opacity: var(--soft); white-space: nowrap; }
+
+.chart {   /* one chart large, with its range */
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  gap: 2vh;
+  padding: 6vh 5vw 20vh;
+  color: var(--fg);
+  background: #000;
+}
+.chart[hidden] { display: none; }
+.chart-top { display: flex; align-items: baseline; gap: 3vw; font-size: 3.2vh; letter-spacing: 0.16em; text-transform: uppercase; }
+#chart-value { margin-left: auto; font-size: 6vh; font-weight: 300; letter-spacing: 0; }
+.chart-body { flex: 1; min-height: 0; display: flex; gap: 1.6vw; }
+.chart-scale { display: flex; flex-direction: column; justify-content: space-between; font-size: 2.4vh; opacity: var(--soft); text-align: right; }
+.chart-box { flex: 1; min-width: 0; border-left: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.chart-box svg { display: block; width: 100%; height: 100%; }
+.chart-dates { display: flex; justify-content: space-between; padding-left: 8vw; font-size: 2.4vh; opacity: var(--soft); }
+
 /* --- camera alarms of the last 24 hours: a list, and one picture full screen -- */
 #view-events { padding: 4vh 4vw 0; opacity: 1; }
 .ev-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16vh; scrollbar-width: none; }   /* room for the buttons */
@@ -576,7 +649,7 @@ body.remote .settings-actions { flex-wrap: wrap; }
   #view-camera .head { padding: 3vh 4vw 0; }
   .cams { grid-template-columns: 1fr; align-content: center; }   /* cameras one above the other */
 
-  .nav button { font-size: 2.7vw; letter-spacing: 0.12em; text-indent: 0.12em; padding: 1.6vh 1.8vw; }
+  .nav button { font-size: 2.6vw; letter-spacing: 0.1em; text-indent: 0.1em; padding: 1.6vh 1.3vw; }
   .status { font-size: 2.6vw; }
 
   .alarm-top { flex-wrap: wrap; font-size: 3.4vw; padding: 2vh 4vw 4vh; }
@@ -603,6 +676,27 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .field-group { font-size: 3.6vw; gap: 3vw; }
   .settings-actions { flex-wrap: wrap; }
   .settings-actions button { font-size: 3.4vw; padding: 1.6vh 5vw; }
+
+  /* the paper upright: the charts first, three across, then the reading below */
+  #view-news { padding: 3vh 4vw 0; }
+  .paper-name { font-size: 4.6vw; }
+  .paper { grid-template-columns: 1fr; padding-bottom: 14vh; }
+  .paper h2 { font-size: 2.6vw; }
+  .paper-money { padding-right: 0; }
+  .paper-read { margin-top: 2.2vh; padding: 2vh 0 0; border-left: 0; border-top: 1px solid var(--rule); }
+  .paper-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1vh 2vw; }
+  .card { padding: 1vh 1.8vw 0.8vh; }
+  .card-name { font-size: 2.3vw; }
+  .card-value { font-size: 4.6vw; }
+  .card-move { min-height: 2.8vw; font-size: 2.3vw; }
+  .card-note { font-size: 2.6vw; }
+  .card svg { height: 3.6vh; }
+  .paper-foot { font-size: 2.8vw; }
+  .paper-read li { font-size: 3.5vw; -webkit-line-clamp: 3; }
+  .chart-top { font-size: 3.6vw; }
+  #chart-value { font-size: 7vw; }
+  .chart-scale, .chart-dates { font-size: 2.8vw; }
+  .chart-dates { padding-left: 14vw; }
 
   #view-events { padding: 3vh 4vw 0; }
   .ev { grid-template-columns: 1fr; gap: 1.4vh; padding: 1.8vh 0; }

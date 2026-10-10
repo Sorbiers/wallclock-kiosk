@@ -49,6 +49,29 @@
   <section class="wx-strip" id="wx-days"></section>
 </main>
 
+<main id="view-news" class="view" hidden>
+  <header class="head">
+    <div class="digits" id="news-digits"></div>
+    <div class="headtext">
+      <div class="dateline" id="news-date"></div>
+      <div class="paper-line"><span class="paper-name">The Wall Paper</span><span class="ev-title" id="news-note"></span></div>
+    </div>
+  </header>
+  <div class="paper">
+    <section class="paper-money">
+      <h2>Money and fuel</h2>
+      <div class="paper-cards" id="paper-cards"></div>
+      <p class="paper-foot" id="paper-foot"></p>
+    </section>
+    <section class="paper-read">
+      <h2>On this day</h2>
+      <ol id="paper-past" class="paper-past"></ol>
+      <h2>Headlines</h2>
+      <ol id="paper-news" class="paper-news"></ol>
+    </section>
+  </div>
+</main>
+
 <main id="view-slides" class="view" hidden>
   <div class="ss-stage" id="ss-stage"></div>
   <div class="digits ss-clock" id="ss-digits"></div>
@@ -82,6 +105,7 @@
   <button type="button" data-view="camera">Camera</button>
   <button type="button" data-view="events">Events</button>
   <button type="button" data-view="weather">Weather</button>
+  <button type="button" data-view="news">News</button>
   <button type="button" data-view="slides">Slides</button>
   <button type="button" data-view="settings" aria-label="Settings">&#9881;</button>
 </nav>
@@ -99,6 +123,16 @@
     <button type="button" id="wake-snooze">Snooze 5 min</button>
     <button type="button" id="wake-stop" class="primary">Stop</button>
   </div>
+</div>
+
+<div id="chart" class="chart" hidden>
+  <div class="chart-top"><span id="chart-name"></span><span id="chart-value"></span></div>
+  <div class="chart-body">
+    <div class="chart-scale"><span id="chart-high"></span><span id="chart-low"></span></div>
+    <div class="chart-box" id="chart-box"></div>
+  </div>
+  <div class="chart-dates"><span id="chart-from"></span><span id="chart-to"></span></div>
+  <button type="button" id="chart-close" class="alarm-cancel">Close</button>
 </div>
 
 <div id="shot" class="shot" hidden>

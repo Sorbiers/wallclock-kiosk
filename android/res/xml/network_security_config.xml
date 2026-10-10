@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Cleartext: the cameras only speak plain HTTP on the home network. -->
+    <base-config cleartextTrafficPermitted="true" />
+
+    <!-- Quebec's fuel price feed (the newspaper page) is signed by a certificate
+         authority newer than Android 13's built-in list: "SSL.com TLS RSA Root
+         CA 2022", which current browsers trust. It is added here for this one
+         site only (res/raw, SHA-256 8F:AF:7D:2E...17:F2:ED). -->
+    <domain-config>
+        <domain includeSubdomains="true">regieessencequebec.ca</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/sslcom_tls_rsa_root_ca_2022" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

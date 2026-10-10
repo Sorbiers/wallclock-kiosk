@@ -15,6 +15,8 @@ import java.io.FileInputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -23,7 +25,8 @@ import java.util.Map;
  * Answers the page's own requests from inside the app: its files come from the
  * bundled assets, "/cam/..." is fetched from a camera with the login, and
  * "/slides/..." comes from the slideshow folder and "/media/..." from the
- * folder of what the alarm clock plays.
+ * folder of what the alarm clock plays. "/feed/..." is fetched from the two
+ * services the newspaper page uses that a web page is not let to read.
  * Anything else (the weather service) goes to the network as usual.
  */
 final class PageClient extends WebViewClient {
@@ -59,6 +62,7 @@ final class PageClient extends WebViewClient {
         if (path.startsWith("/cam/")) return cameras.snapshot(path);
         if (path.startsWith("/slides/")) return slide(new File(path).getName());   // the name only: no ".."
         if (path.startsWith("/media/")) return media(new File(path).getName(), header(request, "Range"));
+        if (path.startsWith("/feed/")) return feed(url);
         String file = path.equals("/") ? "index.html" : path.substring(1);
         try {
             return new WebResourceResponse(mimeType(file), "utf-8", assets.open(file));
@@ -157,6 +161,47 @@ final class PageClient extends WebViewClient {
     static boolean isMedia(String name) {
         String type = mimeType(name.toLowerCase());
         return type.startsWith("audio/") || type.startsWith("video/") || isPicture(name);
+    }
+
+    /**
+     * For the newspaper page: market data (Yahoo) and headlines (Google News).
+     * Only these two addresses, built here from checked parts: the page cannot
+     * make the app fetch anything else.
+     */
+    private WebResourceResponse feed(Uri url) {
+        String address, type;
+        if ("/feed/yahoo".equals(url.getPath())) {
+            String symbol = url.getQueryParameter("symbol");
+            if (symbol == null || !symbol.matches("[A-Za-z0-9^=.\\-]{1,12}")) return failure(400, "Bad Request");
+            address = "https://query1.finance.yahoo.com/v8/finance/chart/" + Uri.encode(symbol) + "?range=3mo&interval=1d";
+            type = "application/json";
+        } else if ("/feed/news".equals(url.getPath())) {
+            String lang = url.getQueryParameter("lang"), country = url.getQueryParameter("country");
+            String city = url.getQueryParameter("city");
+            if (lang == null || !lang.matches("[a-z]{2}") || country == null || !country.matches("[A-Z]{2}")) {
+                return failure(400, "Bad Request");
+            }
+            address = "https://news.google.com/rss"
+                    + (city == null || city.isEmpty() ? "" : "/headlines/section/geo/" + Uri.encode(city))
+                    + "?hl=" + lang + "-" + country + "&gl=" + country + "&ceid=" + country + ":" + lang;
+            type = "text/xml";
+        } else {
+            return failure(404, "Not Found");
+        }
+        try {
+            HttpURLConnection link = (HttpURLConnection) new URL(address).openConnection();
+            link.setConnectTimeout(10000);
+            link.setReadTimeout(15000);
+            link.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+            if (link.getResponseCode() != 200) {
+                link.disconnect();
+                return failure(502, "Bad Gateway");
+            }
+            return new WebResourceResponse(type, "utf-8", 200, "OK",
+                    Collections.singletonMap("Cache-Control", "no-store"), link.getInputStream());
+        } catch (IOException | RuntimeException unreachable) {
+            return failure(502, "Bad Gateway");
+        }
     }
 
     static WebResourceResponse failure(int status, String reason) {

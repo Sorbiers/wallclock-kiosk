@@ -25,6 +25,7 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from aiohttp import web
@@ -157,6 +158,32 @@ async def media(request: web.Request) -> web.Response:
     return web.json_response(sorted(p.name for p in MEDIA_DIR.iterdir() if p.suffix.lower() in playable))
 
 
+async def _relay(url: str, content_type: str) -> web.Response:
+    browser = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=browser) as client:
+        response = await client.get(url)
+    if response.status_code != 200:
+        raise web.HTTPBadGateway()
+    return web.Response(body=response.content, content_type=content_type, headers={"Cache-Control": "no-store"})
+
+
+async def feed_yahoo(request: web.Request) -> web.Response:
+    """Market data for the newspaper page, which a web page is not let to read itself."""
+    symbol = request.query.get("symbol", "")
+    if not re.fullmatch(r"[A-Za-z0-9^=.\-]{1,12}", symbol):
+        raise web.HTTPBadRequest()
+    return await _relay(f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol)}?range=3mo&interval=1d", "application/json")
+
+
+async def feed_news(request: web.Request) -> web.Response:
+    """Headlines for the newspaper page: the country's edition, or those about one town."""
+    lang, country, city = request.query.get("lang", ""), request.query.get("country", ""), request.query.get("city", "")
+    if not re.fullmatch(r"[a-z]{2}", lang) or not re.fullmatch(r"[A-Z]{2}", country):
+        raise web.HTTPBadRequest()
+    section = f"/headlines/section/geo/{quote(city)}" if city else ""
+    return await _relay(f"https://news.google.com/rss{section}?hl={lang}-{country}&gl={country}&ceid={country}:{lang}", "text/xml")
+
+
 async def events(request: web.Request) -> web.StreamResponse:
     dev = request.app["dev"]
     response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-store"})
@@ -236,6 +263,8 @@ def main() -> None:
     app.router.add_static("/slides/", SLIDES_DIR)
     MEDIA_DIR.mkdir(exist_ok=True)
     app.router.add_get("/dev/media", media)
+    app.router.add_get("/feed/yahoo", feed_yahoo)
+    app.router.add_get("/feed/news", feed_news)
     app.router.add_static("/media/", MEDIA_DIR)
     app.router.add_static("/", WEB_DIR)
     logger.info("Page with stand-in native side on http://localhost:%d", PORT)

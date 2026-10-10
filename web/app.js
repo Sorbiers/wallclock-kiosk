@@ -15,7 +15,7 @@
   // Opened in another device's browser (served by the tablet, see Remote.java):
   // only the mode buttons and the settings, acting on the tablet.
   const REMOTE = document.body.classList.contains("remote");
-  const VIEWS = ["clock", "camera", "events", "weather", "slides", "settings"];
+  const VIEWS = ["clock", "camera", "events", "weather", "news", "slides", "settings"];
   const DAY_PEEK_MS = 5000;   // a tap at night shows day mode for this long
   const TEST_CODE = "Test";
   const EVENT_LABELS = {
@@ -287,7 +287,7 @@
   }
 
   // --- clock, date, day / night ---------------------------------------------
-  const clocks = ["clock", "cam", "wx", "ss", "ev", "wake"].map((name) => buildDigits($(name + "-digits")));
+  const clocks = ["clock", "cam", "wx", "ss", "ev", "wake", "news"].map((name) => buildDigits($(name + "-digits")));
   // Upright tablet: the main clock stacks; the small header clocks stay in a row.
   const upright = window.matchMedia("(orientation: portrait)");
   const arrangeClock = () => clocks[0].arrange(upright.matches);
@@ -371,7 +371,7 @@
     clocks.forEach((c) => c.set(hhmm));
     const weekday = new Intl.DateTimeFormat(cfg.locale, { weekday: "long" }).format(now);
     const date = new Intl.DateTimeFormat(cfg.locale, { day: "numeric", month: "long" }).format(now);
-    ["clock", "cam", "wx", "ev"].forEach((name) => { $(name + "-date").textContent = weekday + " \u00B7 " + date; });
+    ["clock", "cam", "wx", "ev", "news"].forEach((name) => { $(name + "-date").textContent = weekday + " \u00B7 " + date; });
   }
 
   // --- views and their buttons --------------------------------------------
@@ -387,6 +387,7 @@
     if (name === "slides") startSlides(); else stopSlides();
     if (name === "settings") fillSettings();
     if (name === "events") renderEvents(); else closeEvents();
+    if (name === "news") { renderPaper(); loadPaper(); } else closeChart();
     lastTouch = Date.now();
     updateMode();
   }
@@ -808,6 +809,272 @@
         sky(day.weather_code[i], 1).emoji, temps, day.precipitation_probability_max[i]));
     });
   }
+
+  // --- newspaper: money and fuel in small charts, the day in history, headlines ---
+  // Every piece comes from a free service and is kept (localStorage) with the
+  // time it was read, so the page shows at once and gets through a spell
+  // offline. Yahoo and the news feed do not let a web page read them: the app
+  // fetches those for the page (/feed/...). Fuel prices are today's only, so
+  // their history is what this page has collected itself, one reading a day.
+  const PAPER_MS = 30 * 60000;         // prices that move all day, headlines, air
+  const PAPER_SLOW_MS = 6 * 3600000;   // one value a day or less
+  const PAPER_ASK_MS = 5 * 60000;      // how often an open page looks for what has gone stale
+  const CARDS = [   // key, name, decimals, what goes before and after the number
+    { key: "usdcad", name: "USD / CAD", digits: 4 },
+    { key: "btc", name: "Bitcoin, CAD", digits: 0 },
+    { key: "rate", name: "BoC rate", digits: 2, after: " %", step: true },
+    { key: "fuel", name: "Gas, regular", digits: 1, after: " \u00A2" },
+    { key: "CL=F", name: "WTI oil", digits: 2, before: "$", yahoo: true },
+    { key: "BZ=F", name: "Brent oil", digits: 2, before: "$", yahoo: true },
+    { key: "^GSPC", name: "S&P 500", digits: 0, yahoo: true },
+    { key: "^IXIC", name: "Nasdaq", digits: 0, yahoo: true },
+    { key: "^DJI", name: "Dow Jones", digits: 0, yahoo: true },
+    { key: "^GSPTSE", name: "TSX", digits: 0, yahoo: true },
+    { key: "^N225", name: "Nikkei", digits: 0, yahoo: true },
+  ];
+  const PROVINCES = {
+    Alberta: "AB", "British Columbia": "BC", Manitoba: "MB", "New Brunswick": "NB", "Newfoundland and Labrador": "NL",
+    "Nova Scotia": "NS", Ontario: "ON", "Prince Edward Island": "PE", Quebec: "QC", "Qu\u00E9bec": "QC", Saskatchewan: "SK",
+    "Northwest Territories": "NT", Nunavut: "NU", Yukon: "YT",
+  };
+  let paper = readStore("kiosk-paper") || {};   // key -> { at, tag, data }
+  const paperAsking = {};
+  let paperAsked = 0;
+  let fuelAsked = 0;
+
+  // The kept copy while it is fresh (and still about the same place, day or
+  // language: `tag`); else it is read anew. A failed read keeps the old copy.
+  async function fresh(key, maxAge, load, tag) {
+    const kept = paper[key] && paper[key].tag === (tag || "") ? paper[key] : null;
+    if (kept && Date.now() - kept.at < maxAge) return kept.data;
+    if (paperAsking[key]) return paperAsking[key];
+    paperAsking[key] = (async () => {
+      try {
+        const data = await load();
+        paper[key] = { at: Date.now(), tag: tag || "", data: data };
+        writeStore("kiosk-paper", paper);
+        return data;
+      } catch (e) {
+        return kept ? kept.data : null;
+      } finally {
+        delete paperAsking[key];
+      }
+    })();
+    return paperAsking[key];
+  }
+
+  const getJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  const plain = (text) => String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+  function loadBank(series, query) {   // Bank of Canada: [[time, value], ...]
+    return getJson("https://www.bankofcanada.ca/valet/observations/" + series + "/json?" + query)
+      .then((d) => d.observations.filter((o) => o[series]).map((o) => [Date.parse(o.d + "T12:00"), +o[series].v])
+        .sort((a, b) => a[0] - b[0]));   // "recent" comes newest first
+  }
+
+  async function loadRate() {   // the policy rate over five years: only the days it changed, and today
+    const from = new Date(Date.now() - 5 * 365 * 86400000).toISOString().slice(0, 10);
+    const days = await loadBank("V39079", "start_date=" + from);
+    return days.filter((day, i) => i === 0 || i === days.length - 1 || day[1] !== days[i - 1][1]);
+  }
+
+  function loadYahoo(symbol) {   // three months of daily closes, through the app
+    return getJson("/feed/yahoo?symbol=" + encodeURIComponent(symbol)).then((d) => {
+      const result = d.chart.result[0], closes = result.indicators.quote[0].close;
+      return result.timestamp.map((t, i) => [t * 1000, closes[i]]).filter((point) => point[1] != null);
+    });
+  }
+
+  // Quebec's fuel regulator lists every station with today's prices. The page
+  // keeps the median of the stations in its own town, and logs it once a day.
+  async function loadFuel() {
+    const town = plain(cfg.weather.city);
+    const reply = await fetch("https://regieessencequebec.ca/stations.geojson.gz");
+    if (!reply.ok) throw new Error(reply.status);
+    let bytes = await reply.arrayBuffer();
+    if (new Uint8Array(bytes)[0] === 0x1f) {   // still packed
+      bytes = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+    }
+    const prices = [];
+    JSON.parse(new TextDecoder().decode(bytes)).features.forEach((station) => {
+      const about = station.properties;
+      if (!plain(about.Address).endsWith(", " + town)) return;
+      const regular = (about.Prices || []).find((price) => plain(price.GasType) === "regulier" && price.IsAvailable);
+      const cents = regular ? parseFloat(String(regular.Price).replace(",", ".")) : NaN;
+      if (cents > 0) prices.push([cents, about.brand || about.Name]);
+    });
+    if (!prices.length) return { none: true };   // not a town in Quebec: nothing to show, and no asking again all day
+    prices.sort((a, b) => a[0] - b[0]);
+    const median = prices[Math.floor(prices.length / 2)][0];
+    const log = readStore("kiosk-fuel") || [];   // [[noon of the day, median], ...]
+    const day = new Date().setHours(12, 0, 0, 0);
+    if (log.length && log[log.length - 1][0] === day) log[log.length - 1][1] = median; else log.push([day, median]);
+    writeStore("kiosk-fuel", log.slice(-365));
+    return { median: median, low: prices[0][0], at: prices[0][1] };
+  }
+
+  function loadPast(lang, now) {   // Wikipedia's "on this day": [[year, text], ...]
+    return getJson("https://api.wikimedia.org/feed/v1/wikipedia/" + lang + "/onthisday/selected/"
+      + pad(now.getMonth() + 1) + "/" + pad(now.getDate())).then((d) => d.selected.map((e) => [e.year, e.text]));
+  }
+
+  async function loadHoliday(country) {   // the next public holiday that counts here: { name, date }
+    const place = await locate();
+    const province = country === "CA" && place ? PROVINCES[place.name.split(", ").pop()] : "";
+    const next = (await getJson("https://date.nager.at/api/v3/NextPublicHolidays/" + country))
+      .find((day) => !day.counties || !province || day.counties.includes(country + "-" + province));
+    return next ? { name: next.name, date: next.date } : {};
+  }
+
+  async function loadAir() {
+    const place = await locate();
+    if (!place) return {};
+    const d = await getJson("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + place.lat
+      + "&longitude=" + place.lon + "&current=us_aqi,uv_index");
+    return { aqi: d.current.us_aqi, uv: d.current.uv_index };
+  }
+
+  async function loadNews(lang, country, town) {   // [[headline, source], ...]
+    const reply = await fetch("/feed/news?lang=" + lang + "&country=" + country + (town ? "&city=" + encodeURIComponent(town) : ""));
+    if (!reply.ok) throw new Error(reply.status);
+    const feed = new DOMParser().parseFromString(await reply.text(), "text/xml");
+    return Array.from(feed.querySelectorAll("item")).slice(0, 12).map((item) => {
+      const title = item.querySelector("title").textContent;
+      const from = item.querySelector("source") ? item.querySelector("source").textContent : "";
+      return [from && title.endsWith(" - " + from) ? title.slice(0, -from.length - 3) : title, from];
+    });
+  }
+
+  function loadPaper() {
+    paperAsked = Date.now();
+    const now = new Date(), lang = cfg.locale.slice(0, 2), town = cfg.weather.city;
+    const country = (cfg.weather.country_code || "CA").toUpperCase();
+    const here = plain(town) + "," + country;
+    [
+      fresh("usdcad", PAPER_MS * 4, () => loadBank("FXUSDCAD", "recent=90")),
+      fresh("btc", PAPER_MS, () => getJson("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=cad&days=90&interval=daily").then((d) => d.prices)),
+      fresh("rate", PAPER_SLOW_MS, loadRate),
+      fresh("fuel", PAPER_SLOW_MS, loadFuel, here),
+      fresh("past", PAPER_SLOW_MS, () => loadPast(lang, now), lang + now.toDateString()),
+      fresh("holiday", PAPER_SLOW_MS, () => loadHoliday(country), here + now.toDateString()),
+      fresh("air", PAPER_MS, loadAir, here),
+      fresh("news", PAPER_MS, () => loadNews(lang, country, ""), lang + country),
+      fresh("local", PAPER_MS, () => loadNews(lang, country, town), lang + here),
+    ].concat(CARDS.filter((card) => card.yahoo).map((card) => fresh(card.key, PAPER_MS, () => loadYahoo(card.key))))
+      .forEach((piece) => piece.then(renderPaper));   // each piece shows as it comes
+  }
+
+  function checkPaper() {   // from the clock tick
+    if (REMOTE) return;
+    if (view === "news" && Date.now() - paperAsked > PAPER_ASK_MS) loadPaper();
+    if (Date.now() - fuelAsked > PAPER_MS) {   // the fuel log grows whether the page is looked at or not
+      fuelAsked = Date.now();
+      fresh("fuel", PAPER_SLOW_MS, loadFuel, plain(cfg.weather.city) + "," + (cfg.weather.country_code || "CA").toUpperCase());
+    }
+  }
+
+  const kept = (key) => (paper[key] ? paper[key].data : null);
+  const pointsOf = (card) => (card.key === "fuel" ? readStore("kiosk-fuel") : kept(card.key)) || [];
+  function amount(card, value) {
+    const shown = new Intl.NumberFormat(cfg.locale, { minimumFractionDigits: card.digits, maximumFractionDigits: card.digits }).format(value);
+    return (card.before || "") + shown + (card.after || "");
+  }
+  const shortDay = (ms) => new Intl.DateTimeFormat(cfg.locale, { day: "numeric", month: "short" }).format(new Date(ms));
+
+  // An SVG line through [time, value] points, filling its box; `step` for a
+  // value that holds until it is changed (an interest rate).
+  function lineOf(points, step) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 100 32");
+    svg.setAttribute("preserveAspectRatio", "none");
+    if (points.length < 2) return svg;
+    const values = points.map((point) => point[1]);
+    const low = Math.min.apply(null, values), high = Math.max.apply(null, values);
+    const t0 = points[0][0], span = points[points.length - 1][0] - t0 || 1;
+    const x = (t) => ((t - t0) / span * 100).toFixed(2);
+    const y = (v) => (high === low ? 16 : 30 - (v - low) / (high - low) * 28).toFixed(2);
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", points.map((point, i) => (!i ? "M" + x(point[0]) + " " + y(point[1])
+      : step ? "H" + x(point[0]) + "V" + y(point[1]) : "L" + x(point[0]) + " " + y(point[1]))).join(""));
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function renderPaper() {
+    if (view !== "news") return;
+    const cards = $("paper-cards");
+    cards.textContent = "";
+    CARDS.forEach((card) => {
+      const points = pointsOf(card), fuel = card.key === "fuel" ? kept("fuel") : null;
+      if (card.key === "fuel" && (!fuel || fuel.none)) return;
+      const last = points.length ? points[points.length - 1][1] : null, before = points.length > 1 ? points[points.length - 2][1] : null;
+      const box = el("button", "card");
+      box.type = "button";
+      const move = el("span", "card-move");
+      if (fuel) move.textContent = "low " + amount({ digits: 1 }, fuel.low) + " \u00B7 " + fuel.at;
+      else if (card.step && points.length > 1) move.textContent = "since " + shortDay(points[points.length - 2][0]);
+      else if (before) {
+        const change = (last - before) / before * 100;
+        move.textContent = (change < 0 ? "\u25BC " : "\u25B2 ") + Math.abs(change).toFixed(2) + " %";
+        move.classList.add(change < 0 ? "down" : "up");
+      }
+      box.append(el("span", "card-name", card.name), el("span", "card-value", last == null ? "\u2014" : amount(card, last)), move, lineOf(points, card.step));
+      if (points.length > 1) box.addEventListener("click", () => openChart(card));
+      cards.appendChild(box);
+    });
+    const air = kept("air");
+    if (air && air.aqi != null) {
+      const box = el("div", "card");
+      const word = air.aqi <= 50 ? "good" : air.aqi <= 100 ? "moderate" : air.aqi <= 150 ? "poor" : "bad";
+      box.append(el("span", "card-name", "Air quality"), el("span", "card-value", String(Math.round(air.aqi))),
+        el("span", "card-move", word), el("span", "card-note", "UV index " + Math.round(air.uv)));
+      cards.appendChild(box);
+    }
+
+    const holiday = kept("holiday");
+    if (holiday && holiday.date) {
+      const days = Math.round((new Date(holiday.date + "T12:00").setHours(12) - new Date().setHours(12, 0, 0, 0)) / 86400000);
+      $("paper-foot").textContent = "Next holiday: " + holiday.name + " \u00B7 " + new Intl.DateTimeFormat(cfg.locale,
+        { weekday: "long", day: "numeric", month: "long" }).format(new Date(holiday.date + "T12:00"))
+        + (days === 0 ? " \u00B7 today" : days === 1 ? " \u00B7 tomorrow" : " \u00B7 in " + days + " days");
+    } else $("paper-foot").textContent = "";
+
+    const past = kept("past") || [], list = $("paper-past");
+    list.textContent = "";
+    const first = past.length ? Math.floor(Date.now() / 3600000) % past.length : 0;   // three of them, moving on every hour
+    past.slice(first, first + 3).concat(past.slice(0, Math.max(0, first + 3 - past.length))).forEach((event) => {
+      const row = el("li");
+      row.append(el("b", "", String(event[0])), event[1]);
+      list.appendChild(row);
+    });
+
+    const news = $("paper-news");
+    news.textContent = "";
+    const local = (kept("local") || []).slice(0, 2), seen = new Set(local.map((story) => story[0]));
+    (kept("news") || []).filter((story) => !seen.has(story[0])).slice(0, 5 - local.length).concat(local).forEach((story) => {
+      const row = el("li");
+      row.append(story[0] + " ", el("i", "", story[1]));
+      news.appendChild(row);
+    });
+
+    const read = CARDS.map((card) => (paper[card.key] ? paper[card.key].at : 0)).reduce((a, b) => Math.max(a, b), 0);
+    $("news-note").textContent = read ? "Prices read at " + pad(new Date(read).getHours()) + ":" + pad(new Date(read).getMinutes()) : "";
+  }
+
+  // One chart large, with its range: a tap on a card.
+  function openChart(card) {
+    const points = pointsOf(card), values = points.map((point) => point[1]);
+    $("chart-name").textContent = card.name;
+    $("chart-value").textContent = amount(card, values[values.length - 1]);
+    $("chart-high").textContent = amount(card, Math.max.apply(null, values));
+    $("chart-low").textContent = amount(card, Math.min.apply(null, values));
+    $("chart-from").textContent = shortDay(points[0][0]) + " " + new Date(points[0][0]).getFullYear();
+    $("chart-to").textContent = shortDay(points[points.length - 1][0]);
+    $("chart-box").replaceChildren(lineOf(points, card.step));
+    $("chart").hidden = false;
+  }
+  function closeChart() { $("chart").hidden = true; }
+  $("chart-close").addEventListener("click", closeChart);
 
   // --- camera alarms ---------------------------------------------------------
   // The native side reports each camera rule starting and stopping. When an
@@ -1730,6 +1997,7 @@
     renderStatus();
     reportState();
     checkRestart();
+    checkPaper();
   }, 500);
   window.addEventListener("online", loadWeather);
   start();

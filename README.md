@@ -19,6 +19,12 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   opens a picture full screen.
 - **Weather** — now, the next 24 hours and 7 days (Open-Meteo; in Canada the
   current conditions come from an Environment Canada station).
+- **News** — a newspaper page: small charts of USD/CAD, bitcoin, the Bank of
+  Canada rate, oil and the main stock indexes (a tap enlarges one), pump prices
+  in a Quebec town, air quality, the next public holiday, this day in history
+  and the headlines. All from free services without a key: the Bank of Canada,
+  CoinGecko, Yahoo Finance (unofficial, so it may stop working), Quebec's
+  Régie de l'énergie, Open-Meteo, Nager.Date, Wikipedia and Google News.
 - **Slides** — a slideshow of your own pictures, optionally on a daily schedule
   and with the clock page in between.
 - **Camera alarms** — when a camera's tripwire or intrusion rule fires, pictures
