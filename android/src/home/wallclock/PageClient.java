@@ -2,6 +2,8 @@ package home.wallclock;
 
 import android.content.res.AssetManager;
 import android.net.Uri;
+import android.util.Log;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -31,12 +33,22 @@ final class PageClient extends WebViewClient {
     private final Cameras cameras;
     private final File slides;
     private final File media;
+    private final Runnable pageDied;
 
-    PageClient(AssetManager assets, Cameras cameras, File slides, File media) {
+    PageClient(AssetManager assets, Cameras cameras, File slides, File media, Runnable pageDied) {
         this.assets = assets;
         this.cameras = cameras;
         this.slides = slides;
         this.media = media;
+        this.pageDied = pageDied;
+    }
+
+    /** The page's own process is gone (out of memory, a crash): this WebView shows nothing any more. */
+    @Override
+    public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+        Log.w("WallClock", "The page's process is gone" + (detail.didCrash() ? " (crashed)" : " (killed)"));
+        pageDied.run();
+        return true;   // taken care of: Android need not kill the app for it
     }
 
     @Override

@@ -30,8 +30,10 @@
     weather: { city: "", country_code: "", units: "metric", refresh_minutes: 15 },
     night: {
       by: "time", start: "22:00", end: "07:00",   // by: "time" = these hours, "dark" = when the room is dark
-      dark_lux: 5, color: "#8f5cff", dim: 0.45, brightness: 0.03,
+      dark_lux: 5, light_lux: 10,                 // by "dark": night below dark_lux, day again from light_lux
+      color: "#8f5cff", dim: 0.45, brightness: 0.03,
     },
+    restart_at: "04:00",                          // the app starts afresh every night; "" = never
     day: {
       brightness: -1, color: "#ffffff",   // brightness -1 = leave the backlight to Android
       auto: { on: true, min: 0.1, max: 1, full_lux: 300 },   // or scale it by the room light ourselves
@@ -94,7 +96,8 @@
     remoteAddress: () => window.Android.remoteAddress(),
     lux: () => window.Android.lux(),   // room light from the tablet's sensor; below 0 = no sensor
     clearCache: () => window.Android.clearCache(),
-    restart: () => window.Android.restart(),
+    restart: (view) => window.Android.restart(view || ""),   // comes back on that view; the clock if none
+    report: (json) => window.Android.report(json),           // what the page is doing, for the remote page
     setVolume: (share) => window.Android.setVolume(share),
   } : REMOTE ? {
     getConfig: () => api("/api/config"),
@@ -115,6 +118,7 @@
     listSlides: () => fetch("/dev/slides").then((r) => r.json()),
     listMedia: () => fetch("/dev/media").then((r) => r.json()),
   };
+  const BUILD = window.Android ? window.Android.build() : "";   // when the app was built, and from which commit
   window.kioskNative = { event: onCameraEvent, status: onCameraStatus, back: () => show("clock"), remote: onRemote };
 
   // The remote page sends commands; the tablet carries them out.
@@ -124,11 +128,13 @@
 
   // Remote side: every request carries the PIN, kept in this browser. The
   // tablet answers 401 when it is missing or wrong, and we ask for it.
+  let pinWorks = false;
   async function api(path, body) {
     for (;;) {
       const options = { headers: { "X-Pin": localStorage.getItem("kiosk-pin") || "" } };
       if (body != null) { options.method = "POST"; options.body = body; }
       const reply = await fetch(path, options);
+      pinWorks = reply.ok;
       if (reply.ok) return reply.text();
       if (reply.status === 403) {
         alert("The remote control is off. Set a PIN in the settings on the tablet itself (gear, General).");
@@ -297,9 +303,10 @@
     return dark === null ? inSpan(cfg.night.start, cfg.night.end, now) : dark;
   }
 
-  // Night mode by room light. The reading must stay across the limit for a few
-  // seconds (a passing shadow does nothing), and it takes twice the limit to
-  // leave night mode, so the screen's own glow cannot make it flip back and forth.
+  // Night mode by room light: night below night.dark_lux, day again from
+  // night.light_lux. The gap between the two keeps the screen's own glow from
+  // flipping it back and forth, and the reading must stay across a limit for a
+  // few seconds (a passing shadow does nothing).
   const DARK_SETTLE_MS = 5000;
   let dark = false;
   let darkFlipAt = 0;
@@ -307,7 +314,7 @@
   function roomIsDark() {
     const lux = native.lux ? native.lux() : -1;
     if (lux < 0) return null;   // no sensor here: the caller falls back to the hours
-    const wanted = lux < cfg.night.dark_lux * (dark ? 2 : 1);
+    const wanted = lux < (dark ? Math.max(cfg.night.light_lux, cfg.night.dark_lux) : cfg.night.dark_lux);
     if (wanted === dark) darkFlipAt = 0;
     else if (!darkFlipAt) darkFlipAt = Date.now();
     else if (Date.now() - darkFlipAt > DARK_SETTLE_MS) { dark = wanted; darkFlipAt = 0; }
@@ -1336,9 +1343,10 @@
       + "An alarm's volume is a share of the loudest the tablet can do, whatever its volume is set to.",
   };
   // Tabs of [setting, label, kind, conversion, extra]; kind is an input type, a
-  // list of choices, "media" (a file from the media folder) or "rule" (a line
-  // between groups); extra: { button: [label, action] } puts a button beside
-  // the field.
+  // list of choices, "media" (a file from the media folder) or "group" (a
+  // heading that folds the fields of its group away and sums them up); extra:
+  // { button: [label, action] } puts a button beside the field, { group: n }
+  // puts the field in a group, { describe } gives a heading its summary.
   const percent = { show: (v) => (v < 0 ? "" : Math.round(v * 100)), read: (s) => (s === "" ? -1 : Math.min(100, Math.max(0, +s)) / 100) };
   const number = { show: (v) => v, read: (s) => Math.max(0, +s || 0) };
   const SETTINGS = [
@@ -1347,7 +1355,8 @@
       ["views.buttons_hide_seconds", "Hide the buttons after, s", "number", number],
       ["remote_pin", "Remote control PIN (empty = remote control off)", "text"],
       ["night.by", "Night mode", [["time", "By the clock"], ["dark", "When the room is dark"]]],
-      ["night.dark_lux", "Dark means below, lux", "number", number],
+      ["night.dark_lux", "\u2026night when the room is darker than, lux", "number", number],
+      ["night.light_lux", "\u2026day again when it is lighter than, lux", "number", number],
       ["night.start", "Night mode from", "time"],
       ["night.end", "Night mode until", "time"],
       ["night.brightness", "Night backlight, % (0 = the lowest the screen can do)", "number", percent],
@@ -1361,6 +1370,7 @@
       ["day.color", "Day colour", "color"],
       ["views.camera_timeout_minutes", "Camera view back to clock after, min (0 = never)", "number", number],
       ["views.weather_timeout_minutes", "Weather view back to clock after, min (0 = never)", "number", number],
+      ["restart_at", "Restart the app every night at (empty = never)", "time"],
     ]],
     ["Weather", [
       ["weather.city", "City", "text"],
@@ -1395,8 +1405,9 @@
       ["slides.auto_start", "Start by itself at (empty = off)", "time"],
       ["slides.auto_stop", "Back to the clock at", "time"],
     ]],
-    ["Alarm clock", [0, 1, 2, 3].reduce((rows, i) => rows.concat(i ? [["", "", "rule"]] : [], [
-      ["clock_alarms." + i + ".on", "Alarm " + (i + 1), "checkbox", null, { button: ["Test", (button) => ringAsShown(i, button)] }],
+    ["Alarm clock", [0, 1, 2, 3].reduce((rows, i) => rows.concat([
+      ["", "Alarm " + (i + 1), "group", null, { describe: () => alarmSummary(i) }],
+      ["clock_alarms." + i + ".on", "On", "checkbox", null, { button: ["Test", (button) => ringAsShown(i, button)] }],
       ["clock_alarms." + i + ".time", "Time", "time"],
       ["clock_alarms." + i + ".days", "Days", DAYS],
       ["clock_alarms." + i + ".sound", "Sound", SOUND_NAMES],
@@ -1408,10 +1419,11 @@
       ["clock_alarms." + i + ".youtube", "or a YouTube link", "text"],
       ["clock_alarms." + i + ".volume", "Volume, % of the loudest", "number", percent],
       ["clock_alarms." + i + ".rise", "Volume rises over, s (0 = at once)", "number", number],
-    ]), []), "three"],
+    ].map((field) => [field[0], field[1], field[2], field[3], Object.assign({ group: i }, field[4])])), []), "three"],
   ];
   const FIELDS = SETTINGS.reduce((all, tab) => all.concat(tab[1]), []);
   let settingsTab = 0;
+  let openGroup = 0;   // the alarm unfolded on the Alarm clock tab; -1 = all folded
 
   function pathGet(object, path) {
     return path.split(".").reduce((node, key) => (node == null ? undefined : node[key]), object);
@@ -1435,8 +1447,18 @@
       const box = el("fieldset", tab[2] || "");
       tab[1].forEach((field) => {
         const path = field[0], kind = field[2], convert = field[3], extra = field[4] || {};
-        if (kind === "rule") { box.appendChild(el("div", "field-rule")); return; }
+        if (kind === "group") {
+          const head = el("button", "field-group");
+          head.type = "button";
+          head.dataset.head = extra.group;
+          head.describe = extra.describe;
+          head.append(el("b", "", field[1]), el("span"));
+          head.addEventListener("click", () => { openGroup = openGroup === extra.group ? -1 : extra.group; showGroups(box); });
+          box.appendChild(head);
+          return;
+        }
         const row = el("label", kind === "checkbox" ? "field check" : "field");
+        if (extra.group != null) row.dataset.group = extra.group;
         const value = pathGet(cfg, path);
         let input;
         if (Array.isArray(kind) || kind === "media") {
@@ -1468,8 +1490,30 @@
         box.appendChild(row);
       });
       form.appendChild(box);
+      if (box.querySelector(".field-group")) {   // the summaries follow what is typed
+        box.addEventListener("input", () => showGroups(box));
+        box.addEventListener("change", () => showGroups(box));
+        showGroups(box);
+      }
     });
     showSettingsTab();
+  }
+
+  // One group of fields is unfolded at a time; every heading sums its group up.
+  function showGroups(box) {
+    box.querySelectorAll(".field-group").forEach((head) => {
+      head.classList.toggle("open", +head.dataset.head === openGroup);
+      head.lastChild.textContent = head.describe();
+    });
+    box.querySelectorAll(".field[data-group]").forEach((row) => { row.hidden = +row.dataset.group !== openGroup; });
+  }
+
+  function alarmSummary(i) {   // "07:00 · Mon–Fri · Chime", from what the form shows now
+    const shown = (key) => $("settings-form").querySelector('[data-path="clock_alarms.' + i + "." + key + '"]');
+    const chosen = (key) => (shown(key).selectedOptions[0] ? shown(key).selectedOptions[0].textContent : "");
+    if (!shown("on").checked) return "Off";
+    const plays = shown("youtube").value.trim() ? "YouTube" : shown("media").value || chosen("sound");
+    return [shown("time").value, chosen("days"), plays].join(" \u00B7 ");
   }
 
   function showSettingsTab() {
@@ -1481,6 +1525,7 @@
     $("settings-remote").textContent = !address ? ""
       : cfg.remote_pin ? "Remote control from a PC or phone on this Wi-Fi: " + address
       : "Remote control is off. Set a PIN on the General tab to use it from a PC or phone.";
+    if (BUILD) $("settings-build").textContent = "App built " + BUILD;
   }
 
   // Helps to choose the "dark" limit: the sensor's reading, live, on the General tab.
@@ -1505,6 +1550,33 @@
   $("settings-system").addEventListener("click", () => native.openSystemSettings());
   $("settings-restart").hidden = !REMOTE && !native.restart;
   $("settings-restart").addEventListener("click", () => (REMOTE ? command({ restart: true }) : native.restart()));
+
+  // Remote page: the settings as a file, and back. The camera password and the
+  // PIN never leave the tablet, so the file has neither; a restore keeps the
+  // ones the tablet has.
+  $("settings-backup").hidden = $("settings-restore").hidden = !REMOTE;
+  $("settings-backup").addEventListener("click", () => {
+    const link = el("a");
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" }));
+    link.download = "wallclock-settings-" + new Date().toISOString().slice(0, 10) + ".json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  });
+  $("settings-restore").addEventListener("click", () => $("settings-file").click());
+  $("settings-file").addEventListener("change", async () => {
+    const file = $("settings-file").files[0];
+    $("settings-file").value = "";
+    if (!file) return;
+    let restored = null;
+    try { restored = JSON.parse(await file.text()); } catch (e) { /* not JSON: refused below */ }
+    if (!restored || typeof restored !== "object" || !Object.keys(DEFAULTS).some((key) => key in restored)) {
+      alert("This is not a settings file of the wall clock.");
+      return;
+    }
+    if (!confirm("Replace the tablet's settings with those from " + file.name + "?")) return;
+    await api("/api/config", JSON.stringify(restored));
+    location.reload();
+  });
   function testAlarm(cam) {   // cam: position of the camera to pretend about; the first one if not given
     show("clock");
     const first = cfg.cameras.findIndex((camera) => camera.host);
@@ -1514,7 +1586,7 @@
   $("settings-test").addEventListener("click", () => (REMOTE ? command({ test: true }) : testAlarm()));
   // Test one alarm with what the form shows now, saved or not. While it rings
   // its button says Stop.
-  let testing = null;   // { button, timer } while a test rings
+  let testing = null;   // { button, timer, at, heard } while a test rings
 
   function endTest() {
     if (!testing) return;
@@ -1540,22 +1612,89 @@
     };
     if (REMOTE) command({ ring: how }); else ring(how);
     button.textContent = "Stop";
-    // The remote page is not told when the tablet falls silent, so it reckons
-    // how long this alarm can last.
+    // The remote page hears from the tablet when it falls silent (watchTablet);
+    // should that word not come, it reckons how long this alarm can last.
     const rounds = Math.max(1, how.rounds);
     const lasts = youtubeId(how.youtube) || ["audio", "video"].includes(mediaKind(how.media))
       ? Math.max(5, how.max_seconds) * 1000
       : Math.max(2, how.seconds) * 1000 * rounds + ROUND_PAUSE_MS * (rounds - 1);
-    testing = { button: button, timer: setTimeout(endTest, lasts + 2000) };
+    testing = { button: button, timer: setTimeout(endTest, lasts + 2000), at: Date.now(), heard: false };
   }
   $("settings-stop").hidden = !REMOTE;
   $("settings-stop").addEventListener("click", () => { endTest(); command({ stop: true }); });
 
+  // --- the tablet tells, the remote page shows ---------------------------------------
+  // Tablet side: what the page is doing, handed to the app whenever it changes.
+  let reported = "";
+  function reportState() {
+    if (!native.report) return;
+    const state = JSON.stringify({
+      view: view, night: night, ringing: ringing, alarm: alarm.open,
+      offline: cfg.cameras.filter((cam, i) => cam.host && cameraState[i] && !cameraState[i].online).map((cam) => cam.name),
+      lux: native.lux ? Math.round(native.lux()) : -1, build: BUILD,
+    });
+    if (state !== reported) native.report(reported = state);
+  }
+
+  // Remote side: asks every two seconds while the page is looked at, and only
+  // with a PIN known to work (a wrong one, repeated, would lock the remote out).
+  let tablet = null;   // the tablet's last report; null = no word from it
+  async function watchTablet() {
+    if (pinWorks && document.visibilityState === "visible") {
+      try {
+        const reply = await fetch("/api/state", { headers: { "X-Pin": localStorage.getItem("kiosk-pin") || "" } });
+        if (reply.status === 401 || reply.status === 429) pinWorks = false;
+        tablet = reply.ok ? JSON.parse(await reply.text()) : null;
+      } catch (e) { tablet = null; }
+      showTablet();
+    }
+    setTimeout(watchTablet, 2000);
+  }
+
+  function showTablet() {
+    const told = tablet && tablet.view ? tablet : null;
+    document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", !!told && b.dataset.view === told.view));
+    $("settings-stop").hidden = !!told && !told.ringing && !told.alarm;   // not known: leave it at hand
+    $("remote-state").classList.toggle("lost", !told);
+    $("settings-build").textContent = told && told.build ? "App on the tablet built " + told.build : "";
+    if (!told) { $("remote-state").textContent = "No word from the tablet"; return; }
+    const shows = told.view === "settings" ? "Settings" : document.querySelector('#nav button[data-view="' + told.view + '"]').textContent;
+    $("remote-state").textContent = ["Tablet shows " + shows, told.ringing ? "alarm clock ringing" : "",
+      told.alarm ? "camera alarm on screen" : "", told.night ? "night mode" : "day mode"]
+      .concat(told.offline.map((name) => name + " offline"), told.lux >= 0 ? ["room light " + told.lux + " lux"] : [])
+      .filter(Boolean).join(" \u00B7 ");
+    if (!testing) return;
+    if (told.ringing) testing.heard = true;
+    else if (testing.heard || Date.now() - testing.at > 8000) endTest();   // it rang and stopped, or never rang
+  }
+  if (REMOTE) watchTablet();
+
+  // --- staying healthy ----------------------------------------------------------------
+  // The page runs for weeks on end, so once a night, at a quiet moment, the app
+  // starts afresh (restart_at) and comes back on the same view. If the page's
+  // process dies in between, the app restarts by itself (PageClient).
+  const RESTART_WINDOW_MIN = 30;           // how long after the set time it may still happen
+  const RESTART_MIN_UP_MS = 3600000;       // not again within the hour, so never twice a night
+  function checkRestart() {
+    if (!native.restart || !cfg.restart_at || performance.now() < RESTART_MIN_UP_MS) return;
+    const now = new Date(), at = cfg.restart_at.split(":");
+    const late = now.getHours() * 60 + now.getMinutes() - (+at[0] * 60 + +at[1]);
+    if (late < 0 || late >= RESTART_WINDOW_MIN) return;
+    const hhmm = pad(now.getHours()) + ":" + pad(now.getMinutes());
+    const busy = ringing || snoozeUntil || alarm.open || view === "settings" || Date.now() - lastTouch < 60000
+      || cfg.clock_alarms.some((a) => a.on && a.time === hhmm);   // an alarm of this minute would ring twice
+    if (!busy) native.restart(view);
+  }
+
   // --- start ----------------------------------------------------------------------
   async function start() {
     try {
-      const saved = await native.getConfig();
-      if (saved) cfg = merge(BASE, JSON.parse(saved));
+      const saved = JSON.parse(await native.getConfig() || "null");
+      if (saved) {
+        cfg = merge(BASE, saved);
+        // Saved before "day again" was a setting of its own: it was twice the dark limit.
+        if (!saved.night || saved.night.light_lux == null) cfg.night.light_lux = cfg.night.dark_lux * 2;
+      }
     } catch (e) { /* first run, or unreadable settings: defaults */ }
     // Alarms saved before each had its own sound, media and timings get them now.
     cfg.clock_alarms = cfg.clock_alarms.map((a) => Object.assign({
@@ -1573,6 +1712,8 @@
     updateMode();
     wxTimer = setInterval(loadWeather, Math.max(5, cfg.weather.refresh_minutes) * 60000);
     loadWeather();
+    const wanted = params.get("view");   // the view the app was on before it restarted itself
+    if (!REMOTE && VIEWS.includes(wanted) && wanted !== "settings") show(wanted);
   }
 
   renderClock(true);
@@ -1587,6 +1728,8 @@
     showRoomLight();
     checkIdle();
     renderStatus();
+    reportState();
+    checkRestart();
   }, 500);
   window.addEventListener("online", loadWeather);
   start();

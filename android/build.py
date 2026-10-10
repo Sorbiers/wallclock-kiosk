@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -26,7 +27,20 @@ TOOLS = sorted((SDK / "build-tools").iterdir())[-1]
 PLATFORM = sorted((SDK / "platforms").iterdir(), key=lambda p: int(p.name.split("-")[1]))[-1] / "android.jar"
 
 MIN_SDK, TARGET_SDK = "30", "34"
-VERSION_CODE, VERSION_NAME = "1", "1.0"
+VERSION_CODE = "1"
+
+
+def build_name() -> str:
+    """When this is built and from which commit ("+" = with changes not committed):
+    the app shows it in its settings, to tell one build from another."""
+    name = time.strftime("%Y-%m-%d %H:%M")
+    try:
+        git = lambda *args: subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+        commit = git("rev-parse", "--short", "HEAD")
+        return name + (f", {commit}{'+' if git('status', '--porcelain') else ''}" if commit else "")
+    except OSError:   # no git here
+        return name
+
 
 # Updates must be signed with the same key, or Android refuses to install over
 # the old app. It only proves "same builder", so a fixed password is fine here.
@@ -51,7 +65,7 @@ def main() -> None:
     run(TOOLS / "aapt2", "link", "-o", BUILD / "base.apk", "-I", PLATFORM,
         "--manifest", APP / "AndroidManifest.xml", "-A", ROOT / "web", "--java", BUILD / "gen",
         "--min-sdk-version", MIN_SDK, "--target-sdk-version", TARGET_SDK,
-        "--version-code", VERSION_CODE, "--version-name", VERSION_NAME,
+        "--version-code", VERSION_CODE, "--version-name", build_name(),
         *(["--debug-mode"] if "--debug" in sys.argv else []), BUILD / "res.zip")
 
     # Java -> classes -> dex

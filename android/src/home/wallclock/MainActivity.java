@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -11,6 +12,9 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.media.AudioManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
@@ -47,6 +51,8 @@ public class MainActivity extends Activity {
     private Cameras cameras;
     private Remote remote;
     private volatile float lux = -1f;   // room light from the sensor; below 0 = not known
+    private volatile String pageState = "{}";   // what the page says it is doing, for the remote page
+    private long startedAt;
     private int volumeBefore = -1;      // the tablet's media volume to put back after an alarm; below 0 = untouched
 
     private final SensorEventListener light = new SensorEventListener() {
@@ -66,6 +72,15 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setShowWhenLocked(true);
         setTurnScreenOn(true);
+        startedAt = SystemClock.elapsedRealtime();
+        // Back from a restart of its own: the backlight as it was (no bright flash at night), the same view.
+        float backlight = getIntent().getFloatExtra("brightness", -1f);
+        if (backlight >= 0) {
+            WindowManager.LayoutParams window = getWindow().getAttributes();
+            window.screenBrightness = Math.min(1f, backlight);
+            getWindow().setAttributes(window);
+        }
+        String view = getIntent().getStringExtra("view");
 
         web = new WebView(this);
         web.setBackgroundColor(Color.BLACK);
@@ -80,10 +95,10 @@ public class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 
         cameras = new Cameras(this::runInPage);
-        web.setWebViewClient(new PageClient(getAssets(), cameras, slides(), media()));
+        web.setWebViewClient(new PageClient(getAssets(), cameras, slides(), media(), this::pageDied));
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(web);
-        web.loadUrl(PAGE);
+        web.loadUrl(view == null ? PAGE : PAGE + "?view=" + view);
 
         remote = new Remote(getAssets(), new RemoteHost());
         remote.start();
@@ -127,6 +142,21 @@ public class MainActivity extends Activity {
         new Thread(remote::close).start();
         web.destroy();
         super.onDestroy();
+    }
+
+    /** Start the whole app afresh, in a new process, on the given view (null: the clock). The settings stay. */
+    private void restart(String view) {
+        Intent again = Intent.makeRestartActivityTask(getComponentName());
+        if (view != null && view.matches("[a-z]+")) again.putExtra("view", view);
+        again.putExtra("brightness", getWindow().getAttributes().screenBrightness);
+        startActivity(again);
+        Runtime.getRuntime().exit(0);
+    }
+
+    /** The page's process died: start afresh. Not at once if it died right after starting, or it could spin. */
+    private void pageDied() {
+        long up = SystemClock.elapsedRealtime() - startedAt;
+        new Handler(Looper.getMainLooper()).postDelayed(() -> restart(null), up < 20000 ? 30000 : 0);
     }
 
     private void runInPage(String javascript) {
@@ -205,6 +235,11 @@ public class MainActivity extends Activity {
         @Override
         public String media() {
             return names(MainActivity.this.media(), false);
+        }
+
+        @Override
+        public String state() {
+            return pageState;
         }
 
         @Override
@@ -315,13 +350,26 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> web.clearCache(true));
         }
 
-        /** Start the whole app afresh, in a new process. The settings stay. */
+        /** Start the whole app afresh; it comes back on `view` (empty: the clock). */
         @JavascriptInterface
-        public void restart() {
-            runOnUiThread(() -> {
-                startActivity(Intent.makeRestartActivityTask(getComponentName()));
-                Runtime.getRuntime().exit(0);
-            });
+        public void restart(final String view) {
+            runOnUiThread(() -> MainActivity.this.restart(view == null || view.isEmpty() ? null : view));
+        }
+
+        /** What the page is doing, as JSON, kept for the remote page. */
+        @JavascriptInterface
+        public void report(String json) {
+            pageState = json;
+        }
+
+        /** When this app was built and from which commit (set by the build): tells builds apart. */
+        @JavascriptInterface
+        public String build() {
+            try {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (PackageManager.NameNotFoundException impossible) {
+                return "";
+            }
         }
     }
 }

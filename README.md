@@ -30,9 +30,12 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
 - **Night mode** — its own colour and backlight, by the clock or when the room
   is dark (light sensor).
 - **Remote control** — a page served by the tablet itself (`http://<tablet>:8080`)
-  to switch modes and edit every setting from a PC or phone.
+  to switch modes and edit every setting from a PC or phone. It shows what the
+  tablet is doing, and saves the settings to a file or restores them from one
+  (without the camera password and the PIN, which never leave the tablet).
 - **Kiosk** — full screen, screen always on, landscape or portrait; can be the
-  tablet's Home app so it starts by itself.
+  tablet's Home app so it starts by itself. It restarts itself every night and
+  whenever its page dies; the settings show when the app was built.
 
 ## What it needs, and its limits
 
@@ -66,7 +69,7 @@ script calls the SDK tools directly.
 | `sync-media.bat [folder]` | Copies what the alarm clock can play (default: `media\`): music, videos, pictures |
 | `wifi-on.bat` | Lets the scripts above reach the tablet over Wi-Fi, without the cable |
 | `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet; pictures and live view are real |
-| `serve.bat [port]` | Shows the page in a desktop browser for development |
+| `serve.bat [port]` | Shows the page in a desktop browser for development; `/remote` there is the remote-control page with a pretend tablet |
 
 `deploy.bat` and the two sync scripts go by USB cable when the tablet is plugged in
 (USB debugging on). To do without the cable, run `wifi-on.bat` once with the

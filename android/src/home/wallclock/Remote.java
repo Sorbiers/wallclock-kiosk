@@ -33,6 +33,9 @@ final class Remote extends Thread {
         /** The names of the files the alarm clock can play, as a JSON list. */
         String media();
 
+        /** What the tablet is doing right now, as JSON. */
+        String state();
+
         void saveConfig(String json);
 
         void command(String json);
@@ -122,6 +125,8 @@ final class Remote extends Thread {
         if (path.equals("/api/config")) {
             if (post) host.saveConfig(body);
             send(out, 200, "application/json", (post ? "{}" : host.config()).getBytes(StandardCharsets.UTF_8));
+        } else if (path.equals("/api/state")) {
+            send(out, 200, "application/json", host.state().getBytes(StandardCharsets.UTF_8));
         } else if (path.equals("/api/media")) {
             send(out, 200, "application/json", host.media().getBytes(StandardCharsets.UTF_8));
         } else if (path.equals("/api/command") && post) {

@@ -57,14 +57,19 @@
 
 <main id="view-settings" class="view" hidden>
   <div class="settings">
+    <p class="remote-state" id="remote-state"></p>
     <div class="tabs" id="settings-tabs"></div>
     <form id="settings-form" onsubmit="return false"></form>
     <p class="settings-hint" id="settings-hint"></p>
     <p class="settings-hint" id="settings-light"></p>
     <p class="settings-hint" id="settings-remote"></p>
+    <p class="settings-hint" id="settings-build"></p>
     <div class="settings-actions">
       <button type="button" id="settings-system">Android settings</button>
       <button type="button" id="settings-restart">Restart app</button>
+      <button type="button" id="settings-backup" hidden>Backup to file</button>
+      <button type="button" id="settings-restore" hidden>Restore from file</button>
+      <input type="file" id="settings-file" accept=".json,application/json" hidden>
       <button type="button" id="settings-stop" hidden>Stop alarm</button>
       <button type="button" id="settings-test">Test camera alarm</button>
       <button type="button" id="settings-save" class="primary">Save</button>

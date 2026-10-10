@@ -9,6 +9,10 @@ the settings. This script does the same four things on the PC. The camera
 login comes from dev/cameras.env (see dev/cameras.example.env; or point
 WALLCLOCK_ENV at another file); settings saved from the page are kept in
 memory only. The tablet never uses this.
+
+http://localhost:8080/remote shows the remote-control page, with this script
+standing in for the tablet: it keeps the settings, and pretends to change view
+and to ring when told to (a ring lasts a few seconds). No PIN is asked.
 """
 
 import asyncio
@@ -18,6 +22,7 @@ import mimetypes
 import os
 import re
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -46,6 +51,7 @@ class Dev:
         self.hosts = [env.get("CAM_HOST", "cam.local"), env.get("CAM_REAR_HOST", "rcam.local")]
         self.saved = None      # settings saved from the page (this run only)
         self.clients = set()   # one queue per open page
+        self.view, self.rings_until = "clock", 0.0   # the pretend tablet behind /remote
 
     def auth(self) -> httpx.DigestAuth:
         return httpx.DigestAuth(self.user, self.password)
@@ -77,6 +83,43 @@ class Dev:
 
 async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_DIR / "index.html")
+
+
+async def remote(request: web.Request) -> web.Response:
+    """The remote-control page: the same page, told that it is one (as the app's own server does)."""
+    page = (WEB_DIR / "index.html").read_text(encoding="utf-8").replace("<body>", '<body class="remote">')
+    return web.Response(text=page, content_type="text/html")
+
+
+async def remote_config(request: web.Request) -> web.Response:
+    """The settings without the camera password and the PIN, which the tablet never sends out either."""
+    return web.json_response({**(request.app["dev"].saved or {}), "camera_password": "", "remote_pin": ""})
+
+
+async def remote_save(request: web.Request) -> web.Response:
+    dev, new = request.app["dev"], json.loads(await request.text())
+    old = dev.saved or {"camera_password": dev.password}
+    for secret in ("camera_password", "remote_pin"):   # left empty = unchanged
+        new[secret] = new.get(secret) or old.get(secret, "")
+    dev.saved = new
+    return web.json_response({})
+
+
+async def remote_state(request: web.Request) -> web.Response:
+    dev = request.app["dev"]
+    return web.json_response({"view": dev.view, "night": False, "ringing": time.time() < dev.rings_until,
+                              "alarm": False, "offline": [], "lux": 120, "build": "dev server"})
+
+
+async def remote_command(request: web.Request) -> web.Response:
+    dev, told = request.app["dev"], json.loads(await request.text())
+    logger.info("remote command: %s", told)
+    dev.view = told.get("view", dev.view)
+    if "ring" in told:
+        dev.rings_until = time.time() + 6
+    if told.get("stop"):
+        dev.rings_until = 0.0
+    return web.json_response({})
 
 
 async def get_config(request: web.Request) -> web.Response:
@@ -179,6 +222,12 @@ def main() -> None:
     app.router.add_get("/", index)
     app.router.add_get("/dev/config", get_config)
     app.router.add_post("/dev/config", save_config)
+    app.router.add_get("/remote", remote)
+    app.router.add_get("/api/config", remote_config)
+    app.router.add_post("/api/config", remote_save)
+    app.router.add_get("/api/state", remote_state)
+    app.router.add_get("/api/media", media)
+    app.router.add_post("/api/command", remote_command)
     app.router.add_get("/dev/events", events)
     app.router.add_post("/dev/test-alarm/{cam}", test_alarm)
     app.router.add_get("/cam/{cam}/snapshot.jpg", snapshot)
