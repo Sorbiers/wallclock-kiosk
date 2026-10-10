@@ -305,22 +305,34 @@ body.night .seg.on.rest { opacity: 0.3; }
 .paper-name { font-family: "Noto Serif", Georgia, serif; font-style: italic; font-size: 4.4vh; white-space: nowrap; }
 .paper {
   display: grid;
-  grid-template-columns: 57fr 43fr;
-  padding: 1.8vh 0 3vh;
+  grid-template-columns: 44fr 56fr;
+  padding: 1.6vh 0 1.4vh;
   border-top: 0.7vh double color-mix(in srgb, var(--fg) 55%, transparent);
 }
 .paper h2 { margin-bottom: 1.3vh; font-size: 1.9vh; font-weight: 500; letter-spacing: 0.3em; text-transform: uppercase; opacity: var(--soft); }
 .paper-money { min-width: 0; padding-right: 2.6vw; }
-.paper-read { min-width: 0; padding-left: 2.6vw; border-left: 1px solid var(--rule); }
-.paper-read h2:not(:first-child) { margin-top: 1.6vh; padding-top: 1.6vh; border-top: 1px solid var(--rule); }
-.paper-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.3vh 1.1vw; }
+.paper-money[hidden] { display: none; }
+/* the reading: blocks flowing down two columns, as many as are switched on */
+.paper-read { min-width: 0; padding-left: 2.6vw; border-left: 1px solid var(--rule); columns: 2; column-gap: 2.6vw; column-rule: 1px solid var(--rule); }
+.paper-read.single { columns: 1; }
+.paper.only-money, .paper.only-read { grid-template-columns: 1fr; }
+.paper.only-read .paper-read { padding-left: 0; border-left: 0; columns: 3; }
+.paper-block { break-inside: avoid; margin-bottom: 2.6vh; }
+.paper-block p { font-family: "Noto Serif", Georgia, serif; font-size: 2.35vh; line-height: 1.34; }
+.paper-block p + p { margin-top: 0.7vh; }
+.paper-block .paper-credit { font-family: Roboto, system-ui, sans-serif; font-size: 1.7vh; letter-spacing: 0.06em; opacity: var(--soft); }
+.paper-picture img { display: block; width: 100%; max-height: 30vh; margin-bottom: 1vh; object-fit: contain; background: #000; }
+.paper-picture p:not(.paper-credit) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.paper-feast { font-weight: 700; }
+.paper-joke p:not(.paper-credit) { white-space: pre-line; }
+.paper-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(11.8vw, 1fr)); gap: 1vh 1vw; }
 .card {
   display: grid;
   grid-template-areas: "name" "value" "move" "line";
   grid-template-columns: minmax(0, 1fr);
   gap: 0.2vh;
   min-width: 0;
-  padding: 1.1vh 0.9vw 0.9vh;
+  padding: 0.9vh 0.9vw 0.7vh;
   font: inherit;
   text-align: left;
   color: inherit;
@@ -332,12 +344,12 @@ body.night .seg.on.rest { opacity: 0.3; }
 .card-value { grid-area: value; font-size: 3.5vh; font-weight: 300; white-space: nowrap; }
 .card-move { grid-area: move; min-height: 2.1vh; font-size: 1.7vh; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-note { grid-area: line; align-self: center; font-size: 1.9vh; opacity: var(--soft); }
-.card svg { grid-area: line; display: block; width: 100%; height: 7vh; margin-top: 0.4vh; overflow: visible; }
+.card svg { grid-area: line; display: block; width: 100%; height: 4.2vh; margin-top: 0.3vh; overflow: visible; }   /* four rows of cards fit the screen */
 .card path, .chart path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .up { color: #5fd38d; }
 .down { color: #ff7a6b; }
 body.night .up, body.night .down { color: inherit; }   /* no bright colours at night */
-.paper-foot { margin-top: 1.6vh; font-size: 2vh; letter-spacing: 0.06em; opacity: var(--soft); }
+.paper-foot { margin-top: 1.2vh; font-size: 2vh; letter-spacing: 0.06em; opacity: var(--soft); }
 .paper-read ol { padding: 0; list-style: none; font-family: "Noto Serif", Georgia, serif; }
 .paper-read li {
   display: -webkit-box;
@@ -539,7 +551,7 @@ body.remote .settings-actions { flex-wrap: wrap; }
 .field[hidden] { display: none; }
 .remote-state { display: none; }   /* what the tablet is doing: on the remote page only */
 .settings fieldset.three .field.check { align-self: end; padding-bottom: 1vh; }   /* level with the inputs beside it */
-.field.check { flex-direction: row; align-items: center; gap: 1.4vw; font-size: 2.8vh; }
+.field.check { flex-direction: row; justify-content: flex-start; align-items: center; gap: 1.4vw; font-size: 2.8vh; }
 .field.check input { order: -1; width: 4.4vh; height: 4.4vh; padding: 0; accent-color: #fff; }
 .settings-hint { margin-top: 2vh; font-size: 2.4vh; opacity: 0.6; }
 .settings-hint[hidden] { display: none; }
@@ -683,7 +695,10 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .paper { grid-template-columns: 1fr; padding-bottom: 14vh; }
   .paper h2 { font-size: 2.6vw; }
   .paper-money { padding-right: 0; }
-  .paper-read { margin-top: 2.2vh; padding: 2vh 0 0; border-left: 0; border-top: 1px solid var(--rule); }
+  .paper-read, .paper.only-read .paper-read { margin-top: 2.2vh; padding: 2vh 0 0; border-left: 0; border-top: 1px solid var(--rule); columns: 1; }
+  .paper-block p { font-size: 3.5vw; }
+  .paper-block .paper-credit { font-size: 2.4vw; }
+  .paper-picture img { max-height: 36vh; }
   .paper-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1vh 2vw; }
   .card { padding: 1vh 1.8vw 0.8vh; }
   .card-name { font-size: 2.3vw; }

@@ -164,9 +164,10 @@ final class PageClient extends WebViewClient {
     }
 
     /**
-     * For the newspaper page: market data (Yahoo) and headlines (Google News).
-     * Only these two addresses, built here from checked parts: the page cannot
-     * make the app fetch anything else.
+     * For the newspaper page: market data (Yahoo), headlines (Google News), the
+     * Orthodox calendar (azbyka.ru) and the jokes of the day (anekdot.ru). Only
+     * these addresses, built here from checked parts: the page cannot make the
+     * app fetch anything else.
      */
     private WebResourceResponse feed(Uri url) {
         String address, type;
@@ -184,6 +185,14 @@ final class PageClient extends WebViewClient {
             address = "https://news.google.com/rss"
                     + (city == null || city.isEmpty() ? "" : "/headlines/section/geo/" + Uri.encode(city))
                     + "?hl=" + lang + "-" + country + "&gl=" + country + "&ceid=" + country + ":" + lang;
+            type = "text/xml";
+        } else if ("/feed/church".equals(url.getPath())) {
+            String date = url.getQueryParameter("date");
+            if (date == null || !date.matches("\\d{4}-\\d{2}-\\d{2}")) return failure(400, "Bad Request");
+            address = "https://azbyka.ru/days/api/day/" + date + ".json";
+            type = "application/json";
+        } else if ("/feed/jokes".equals(url.getPath())) {
+            address = "https://www.anekdot.ru/rss/export_j.xml";
             type = "text/xml";
         } else {
             return failure(404, "Not Found");

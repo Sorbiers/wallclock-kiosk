@@ -184,6 +184,18 @@ async def feed_news(request: web.Request) -> web.Response:
     return await _relay(f"https://news.google.com/rss{section}?hl={lang}-{country}&gl={country}&ceid={country}:{lang}", "text/xml")
 
 
+async def feed_church(request: web.Request) -> web.Response:
+    """The Russian Orthodox calendar for a day."""
+    date = request.query.get("date", "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        raise web.HTTPBadRequest()
+    return await _relay(f"https://azbyka.ru/days/api/day/{date}.json", "application/json")
+
+
+async def feed_jokes(request: web.Request) -> web.Response:
+    return await _relay("https://www.anekdot.ru/rss/export_j.xml", "text/xml")
+
+
 async def events(request: web.Request) -> web.StreamResponse:
     dev = request.app["dev"]
     response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-store"})
@@ -265,6 +277,8 @@ def main() -> None:
     app.router.add_get("/dev/media", media)
     app.router.add_get("/feed/yahoo", feed_yahoo)
     app.router.add_get("/feed/news", feed_news)
+    app.router.add_get("/feed/church", feed_church)
+    app.router.add_get("/feed/jokes", feed_jokes)
     app.router.add_static("/media/", MEDIA_DIR)
     app.router.add_static("/", WEB_DIR)
     logger.info("Page with stand-in native side on http://localhost:%d", PORT)

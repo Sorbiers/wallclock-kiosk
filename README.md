@@ -21,10 +21,13 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   current conditions come from an Environment Canada station).
 - **News** — a newspaper page: small charts of USD/CAD, bitcoin, the Bank of
   Canada rate, oil and the main stock indexes (a tap enlarges one), pump prices
-  in a Quebec town, air quality, the next public holiday, this day in history
-  and the headlines. All from free services without a key: the Bank of Canada,
-  CoinGecko, Yahoo Finance (unofficial, so it may stop working), Quebec's
-  Régie de l'énergie, Open-Meteo, Nager.Date, Wikipedia and Google News.
+  in a Quebec town, air quality, the next public holiday, the picture of the
+  day, this day in history and the headlines; optionally Russian picks: name
+  days, the Orthodox calendar, history and a joke of the day. The settings
+  choose what is shown. All from free services without a key: the Bank of
+  Canada, CoinGecko, Yahoo Finance (unofficial, so it may stop working),
+  Quebec's Régie de l'énergie, Open-Meteo, Nager.Date, Wikipedia and Wikimedia
+  Commons, Google News, azbyka.ru and anekdot.ru.
 - **Slides** — a slideshow of your own pictures, optionally on a daily schedule
   and with the clock page in between.
 - **Camera alarms** — when a camera's tripwire or intrusion rule fires, pictures
