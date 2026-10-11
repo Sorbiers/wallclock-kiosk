@@ -240,8 +240,8 @@ body.night .seg.on.rest { opacity: 0.3; }
 
 #alarm-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 #alarm-img[hidden] { display: none; }
-/* upright tablet: pictures above, the alarmed camera live below */
-.alarm-live { position: absolute; left: 0; right: 0; bottom: 0; height: 44%; background: #000; }
+/* the alarmed camera live on the left, the pictures it took on the right; upright, pictures above and live below */
+.alarm-live { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; background: #000; }
 .alarm-live[hidden] { display: none; }
 .alarm-live canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
 .alarm-live-tag {
@@ -255,9 +255,8 @@ body.night .seg.on.rest { opacity: 0.3; }
   text-transform: uppercase;
   background: var(--alarm);
 }
-.alarm.with-live #alarm-img { height: 56%; }
-.alarm.with-live .alarm-wait { inset: 0 0 44% 0; }
-.alarm.with-live .alarm-cancel { bottom: calc(44% + 2vh); }
+.alarm.with-live #alarm-img { left: 50%; width: 50%; }
+.alarm.with-live .alarm-wait { inset: 0 0 0 50%; }
 .alarm-wait {
   position: absolute;
   inset: 0;
@@ -424,7 +423,7 @@ body.night .up, body.night .down { color: inherit; }   /* no bright colours at n
 #shot-next { right: 0; text-align: right; padding-right: 3vw; }
 
 /* --- settings: a plain form, never dimmed ----------------------------------- */
-#view-settings { opacity: 1; color: #fff; overflow-y: auto; }
+#view-settings { opacity: 1; color: #fff; background: #000; overflow-y: auto; }   /* a page of its own: nothing shows through */
 .settings { width: min(92vw, 150vh); margin: 0 auto; padding: 4vh 0 24vh; }
 .settings fieldset { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.2); padding: 2.4vh 0 1vh; }
 .settings legend { padding-right: 1.4vw; font-size: 2.3vh; letter-spacing: 0.2em; text-transform: uppercase; opacity: 0.6; }
@@ -664,6 +663,10 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .nav button { font-size: 2.6vw; letter-spacing: 0.1em; text-indent: 0.1em; padding: 1.6vh 1.3vw; }
   .status { font-size: 2.6vw; }
 
+  .alarm-live { top: auto; width: auto; right: 0; height: 44%; }
+  .alarm.with-live #alarm-img { left: 0; width: 100%; height: 56%; }
+  .alarm.with-live .alarm-wait { inset: 0 0 44% 0; }
+  .alarm.with-live .alarm-cancel { bottom: calc(44% + 2vh); }
   .alarm-top { flex-wrap: wrap; font-size: 3.4vw; padding: 2vh 4vw 4vh; }
   .alarm-cancel { font-size: 4.4vw; padding: 2vh 6vw; }
   #wake-digits { width: 84vw; }

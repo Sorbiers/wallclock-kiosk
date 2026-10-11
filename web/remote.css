@@ -1,0 +1,167 @@
+/* The remote control: a page the tablet serves to a PC or phone, made like a
+   TV remote. Fixed sizes (rem), so the browser's zoom works. */
+
+:root {
+  --shell: #2b2d33;
+  --shell-dark: #15161a;
+  --key: #3a3d45;
+  --key-dark: #25272d;
+  --ink: #e9ecf1;
+  --quiet: #8b919c;
+  --lcd: #0a1418;
+  --lcd-ink: #c9f1f7;
+  --lit: #6fd3ff;
+  --red: #e5484d;
+  --yellow: #f2c037;
+  --blue: #3f7fe8;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+body {
+  min-height: 100vh;
+  padding: 1.5rem 0.75rem 3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--ink);
+  background: radial-gradient(120% 80% at 50% 0%, #1b1d22 0%, #08090b 70%) fixed;
+  font-family: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+[hidden] { display: none !important; }
+
+/* --- the handset ---------------------------------------------------------- */
+.handset {
+  width: min(23rem, 100%);
+  padding: 1.1rem 1.25rem 1.5rem;
+  border-radius: 2.6rem 2.6rem 3.2rem 3.2rem;
+  background: linear-gradient(165deg, var(--shell), var(--shell-dark) 55%, #0e0f12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 -0.7rem 1.5rem rgba(0, 0, 0, 0.55),
+    0 2.2rem 4rem rgba(0, 0, 0, 0.65);
+}
+.top { display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0.5rem 0.8rem; }
+.brand { font-size: 0.72rem; letter-spacing: 0.42em; text-transform: uppercase; color: var(--quiet); }
+.led { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #3a3d45; box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.6); }
+.led.on { background: #46e08a; box-shadow: 0 0 0.6rem #46e08a; }
+.led.alert { background: var(--red); box-shadow: 0 0 0.7rem var(--red); animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { opacity: 0.25; } }
+
+/* --- its display: the time, and what the wall clock is doing ---------------- */
+.lcd {
+  padding: 1rem 1.1rem 1.05rem;
+  border-radius: 1.1rem;
+  color: var(--lcd-ink);
+  background: linear-gradient(180deg, #071015, var(--lcd));
+  box-shadow: inset 0 2px 0.7rem rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(111, 211, 255, 0.12), 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.lcd-time { font-size: 4rem; line-height: 1; font-weight: 300; letter-spacing: 0.04em; }
+.lcd-date { margin-top: 0.4rem; font-size: 0.92rem; letter-spacing: 0.2em; text-transform: uppercase; }
+.lcd-weather { margin-top: 0.5rem; min-height: 1.3rem; font-size: 1.05rem; }
+.lcd-state {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(201, 241, 247, 0.16);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8fc3cc;
+}
+.lcd-state b { font-weight: inherit; color: var(--lcd-ink); }
+.lcd-state .bad { color: #ff9c96; }
+.lcd-alert { margin-top: 0.5rem; font-size: 0.84rem; line-height: 1.4; letter-spacing: 0.12em; text-transform: uppercase; color: #ffb3ae; animation: blink 1.2s steps(2, start) infinite; }
+
+/* --- keys --------------------------------------------------------------------- */
+.key {
+  appearance: none;
+  padding: 0.95rem 0.4rem;
+  font: inherit;
+  font-size: 0.82rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+  border: 0;
+  border-radius: 0.95rem;
+  background: linear-gradient(180deg, var(--key), var(--key-dark));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0.22rem 0 #0a0a0c, 0 0.5rem 0.8rem rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.06s, box-shadow 0.06s;
+}
+.key:active { transform: translateY(0.18rem); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0.04rem 0 #0a0a0c; }
+.key:focus-visible, .signin input:focus-visible, .who button:focus-visible { outline: 2px solid var(--lit); outline-offset: 2px; }
+.key.on {   /* the page the wall clock is showing */
+  color: #061318;
+  background: linear-gradient(180deg, #a6e7ff, var(--lit));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0.22rem 0 #1c5f7a, 0 0 1.2rem rgba(111, 211, 255, 0.45);
+}
+.key-red { background: linear-gradient(180deg, #f0787b, var(--red)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0.22rem 0 #6d1a1d, 0 0 1rem rgba(229, 72, 77, 0.4); }
+.key-yellow { color: #2a2100; background: linear-gradient(180deg, #ffd96b, var(--yellow)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0.22rem 0 #7a5c0a, 0 0.5rem 0.8rem rgba(0, 0, 0, 0.4); }
+.key-blue { background: linear-gradient(180deg, #6c9ff2, var(--blue)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0.22rem 0 #17346b, 0 0.5rem 0.8rem rgba(0, 0, 0, 0.4); }
+
+#controls { margin-top: 1.1rem; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+.pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.7rem; }
+.label { margin: 1.1rem 0.3rem 0.6rem; font-size: 0.66rem; letter-spacing: 0.34em; text-transform: uppercase; color: var(--quiet); }
+.groove { height: 0.25rem; margin: 1.3rem 0.2rem; border-radius: 1rem; background: #0c0d10; box-shadow: inset 0 1px 2px #000, 0 1px 0 rgba(255, 255, 255, 0.07); }
+.who { display: flex; justify-content: space-between; align-items: center; margin: 1.2rem 0.3rem 0; font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--quiet); }
+.who button { padding: 0.3rem 0; font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--quiet); background: none; border: 0; border-bottom: 1px solid currentColor; cursor: pointer; }
+
+/* --- signing in ----------------------------------------------------------------- */
+.signin { display: grid; gap: 0.7rem; margin-top: 1.1rem; }
+.signin p { min-height: 1.2rem; font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--quiet); }
+.signin p.bad { color: #ff9c96; }
+.signin input {
+  padding: 0.85rem 0.9rem;
+  font: inherit;
+  font-size: 1.05rem;
+  color: var(--ink);
+  border: 0;
+  border-radius: 0.8rem;
+  background: #0d0e11;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/* --- the list of camera alarms ----------------------------------------------------- */
+.events { width: min(64rem, 100%); }
+.events-head { display: flex; align-items: center; gap: 1.2rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.14); }
+.events-head .key { padding: 0.7rem 1.1rem; }
+.events-head h1 { font-size: 1.05rem; font-weight: 400; letter-spacing: 0.24em; text-transform: uppercase; }
+.events-head h1 span { color: var(--quiet); }
+.events-note { padding: 2rem 0; font-size: 0.95rem; letter-spacing: 0.1em; color: var(--quiet); }
+.events-note:empty { display: none; }
+.event { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 1.4rem; align-items: center; padding: 1.1rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.event-time { font-size: 2.3rem; font-weight: 300; line-height: 1; }
+.event-cam { margin-top: 0.45rem; font-size: 0.9rem; letter-spacing: 0.18em; text-transform: uppercase; }
+.event-what { margin-top: 0.2rem; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--quiet); }
+.event-shots { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.shot-key { width: 9.6rem; aspect-ratio: 16 / 9; padding: 0; border: 0; border-radius: 0.35rem; overflow: hidden; background: #121317; cursor: zoom-in; }
+.shot-key img { display: block; width: 100%; height: 100%; object-fit: cover; }
+@media (max-width: 40rem) {
+  .event { grid-template-columns: 1fr; gap: 0.7rem; }
+  .shot-key { width: calc(50% - 0.25rem); }
+}
+
+.lightbox { position: fixed; inset: 0; z-index: 5; background: #000; }
+.lightbox img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.lightbox-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.3rem 2.5rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: linear-gradient(rgba(0, 0, 0, 0.85), transparent);
+}
+.lightbox-step { position: absolute; top: 0; bottom: 0; width: 30%; font: inherit; font-size: 4rem; font-weight: 200; color: #fff; background: none; border: 0; opacity: 0.75; text-shadow: 0 0 1rem #000; cursor: pointer; }
+#lightbox-prev { left: 0; text-align: left; padding-left: 1.2rem; }
+#lightbox-next { right: 0; text-align: right; padding-right: 1.2rem; }
+#lightbox-close { position: absolute; right: 1.3rem; bottom: 1.3rem; padding: 0.8rem 1.6rem; }

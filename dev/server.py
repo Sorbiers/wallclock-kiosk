@@ -11,11 +11,14 @@ WALLCLOCK_ENV at another file); settings saved from the page are kept in
 memory only. The tablet never uses this.
 
 http://localhost:8080/remote shows the remote-control page, with this script
-standing in for the tablet: it keeps the settings, and pretends to change view
-and to ring when told to (a ring lasts a few seconds). No PIN is asked.
+standing in for the tablet: it keeps the settings, pretends to change view and
+to ring when told to (a ring lasts a few seconds). The list of camera alarms,
+which the app copies from the cameras' SD cards, is made up here, for the kiosk
+page as well. Sign in as "dev" with the PIN 1234.
 """
 
 import asyncio
+import io
 import json
 import logging
 import mimetypes
@@ -52,7 +55,8 @@ class Dev:
         self.hosts = [env.get("CAM_HOST", "cam.local"), env.get("CAM_REAR_HOST", "rcam.local")]
         self.saved = None      # settings saved from the page (this run only)
         self.clients = set()   # one queue per open page
-        self.view, self.rings_until = "clock", 0.0   # the pretend tablet behind /remote
+        self.view = "clock"   # the pretend tablet behind /remote: its page, and until when it pretends to ring
+        self.rings_until = self.alarm_until = self.snoozed_until = 0.0
 
     def auth(self) -> httpx.DigestAuth:
         return httpx.DigestAuth(self.user, self.password)
@@ -86,41 +90,124 @@ async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_DIR / "index.html")
 
 
-async def remote(request: web.Request) -> web.Response:
-    """The remote-control page: the same page, told that it is one (as the app's own server does)."""
-    page = (WEB_DIR / "index.html").read_text(encoding="utf-8").replace("<body>", '<body class="remote">')
-    return web.Response(text=page, content_type="text/html")
+async def remote(request: web.Request) -> web.FileResponse:
+    """The remote-control page, as the tablet serves it at "/"."""
+    return web.FileResponse(WEB_DIR / "remote.html")
+
+
+async def remote_settings(request: web.Request) -> web.Response:
+    """The kiosk page told it is the remote control: every setting, as the tablet serves at "/settings"."""
+    page = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    return web.Response(text=page.replace("<body>", '<body class="remote" data-home="/remote">'), content_type="text/html")
+
+
+def _signed_in(request: web.Request) -> None:
+    """The pretend tablet knows one user. (The real rules are in Remote.java; see tools/test_remote.py.)"""
+    if not request.headers.get("X-Pin"):
+        raise web.HTTPUnauthorized()
+    if (request.headers.get("X-User", "").lower(), request.headers["X-Pin"]) != ("dev", "1234"):
+        raise web.HTTPUnauthorized()
 
 
 async def remote_config(request: web.Request) -> web.Response:
-    """The settings without the camera password and the PIN, which the tablet never sends out either."""
-    return web.json_response({**(request.app["dev"].saved or {}), "camera_password": "", "remote_pin": ""})
+    """The settings without the camera password and the PINs, which the tablet never sends out either."""
+    _signed_in(request)
+    config = json.loads(json.dumps(request.app["dev"].saved or {}))
+    for user in config.get("remote", {}).get("users", []):
+        user["pin"] = ""
+    return web.json_response({**config, "camera_password": "", "remote_pin": ""})
 
 
 async def remote_save(request: web.Request) -> web.Response:
+    _signed_in(request)
     dev, new = request.app["dev"], json.loads(await request.text())
     old = dev.saved or {"camera_password": dev.password}
-    for secret in ("camera_password", "remote_pin"):   # left empty = unchanged
-        new[secret] = new.get(secret) or old.get(secret, "")
+    new["camera_password"] = new.get("camera_password") or old.get("camera_password", "")   # left empty = unchanged
+    new.pop("remote", None)   # who may use the remote control is the tablet's own business: it stays as it is
+    if "remote" in old:
+        new["remote"] = old["remote"]
     dev.saved = new
     return web.json_response({})
 
 
 async def remote_state(request: web.Request) -> web.Response:
-    dev = request.app["dev"]
-    return web.json_response({"view": dev.view, "night": False, "ringing": time.time() < dev.rings_until,
-                              "alarm": False, "offline": [], "lux": 120, "build": "dev server"})
+    _signed_in(request)
+    dev, now = request.app["dev"], time.time()
+    return web.json_response({"user": request.headers.get("X-User", ""), "tablet": {
+        "view": dev.view, "night": False, "ringing": now < dev.rings_until, "snoozed": now < dev.snoozed_until,
+        "alarm": now < dev.alarm_until, "alarmText": "Driveway \u00b7 Test alarm \u00b7 12:00:00", "offline": ["Rear"],
+        "weather": "\u26c5 12\u00b0 Partly cloudy \u2191 14\u00b0  \u2193 6\u00b0", "lux": 120, "locale": "en-CA", "build": "dev server"}})
 
 
 async def remote_command(request: web.Request) -> web.Response:
+    _signed_in(request)
     dev, told = request.app["dev"], json.loads(await request.text())
     logger.info("remote command: %s", told)
     dev.view = told.get("view", dev.view)
     if "ring" in told:
         dev.rings_until = time.time() + 6
+    if told.get("test"):
+        dev.alarm_until = time.time() + 8
+    if told.get("snooze") and time.time() < dev.rings_until:
+        dev.rings_until, dev.snoozed_until = 0.0, time.time() + 20
     if told.get("stop"):
-        dev.rings_until = 0.0
+        dev.rings_until = dev.alarm_until = dev.snoozed_until = 0.0
     return web.json_response({})
+
+
+def _made_up_alarms() -> dict:
+    """What the app keeps of the cameras' own alarm pictures, made up: three alarms with a few pictures each."""
+    now = int(time.time() * 1000)
+    made = [(0, "Driveway", ["CrossLineDetection"], 40, 5), (1, "Rear", ["CrossRegionDetection"], 190, 3),
+            (0, "Driveway", ["CrossLineDetection", "CrossRegionDetection"], 1500, 9)]
+    return {"failed": [], "alarms": [
+        {"cam": cam, "name": name, "at": now - minutes * 60000, "codes": codes,
+         "shots": [{"at": now - minutes * 60000 + i * 1000,
+                    "file": f"{now - minutes * 60000 + i * 1000}_{cam}_{'+'.join(codes)}_{number:06X}{i:06X}.jpg"} for i in range(count)]}
+        for number, (cam, name, codes, minutes, count) in enumerate(made, 1)]}
+
+
+def _made_up_shot(request: web.Request) -> web.Response:
+    """A made-up picture for that list: a flat colour with its name written on it."""
+    from PIL import Image, ImageDraw
+    file = request.query.get("file", "")
+    if not re.fullmatch(r"\d+_\d+_[\w+]*_[0-9A-F]+\.jpg", file):
+        raise web.HTTPNotFound()
+    number = sum(map(ord, file))
+    size = (1280, 720) if request.query.get("size") == "full" else (480, 270)
+    picture = Image.new("RGB", size, ((number * 53) % 120 + 40, (number * 31) % 120 + 40, (number * 17) % 120 + 60))
+    ImageDraw.Draw(picture).text((size[0] // 12, size[1] // 8), file, fill="white")
+    jpeg = io.BytesIO()
+    picture.save(jpeg, "JPEG", quality=80)
+    return web.Response(body=jpeg.getvalue(), content_type="image/jpeg")
+
+
+async def card_alarms(request: web.Request) -> web.Response:
+    """For the kiosk page: the alarms the cameras recorded (made up here)."""
+    return web.json_response(_made_up_alarms())
+
+
+async def card_shot(request: web.Request) -> web.Response:
+    return _made_up_shot(request)
+
+
+async def card_since(request: web.Request) -> web.Response:
+    """During an alarm: the pictures copied since that moment. Made up: one more every two seconds, five in all."""
+    began = int(request.query.get("ms", "0")) + 20000   # the page asks from a little before the alarm
+    count = max(0, min(5, int((time.time() * 1000 - began) // 2000)))
+    cam = request.match_info["cam"]
+    return web.json_response([{"at": began + i * 1000, "file": f"{began + i * 1000}_{cam}_CrossLineDetection_{i:012X}.jpg"}
+                              for i in range(count)])
+
+
+async def remote_events(request: web.Request) -> web.Response:
+    _signed_in(request)
+    return web.json_response(_made_up_alarms())
+
+
+async def remote_shot(request: web.Request) -> web.Response:
+    _signed_in(request)
+    return _made_up_shot(request)
 
 
 async def get_config(request: web.Request) -> web.Response:
@@ -262,6 +349,9 @@ def main() -> None:
     app.router.add_get("/dev/config", get_config)
     app.router.add_post("/dev/config", save_config)
     app.router.add_get("/remote", remote)
+    app.router.add_get("/settings", remote_settings)
+    app.router.add_get("/api/events", remote_events)
+    app.router.add_get("/api/shot", remote_shot)
     app.router.add_get("/api/config", remote_config)
     app.router.add_post("/api/config", remote_save)
     app.router.add_get("/api/state", remote_state)
@@ -270,6 +360,9 @@ def main() -> None:
     app.router.add_get("/dev/events", events)
     app.router.add_post("/dev/test-alarm/{cam}", test_alarm)
     app.router.add_get("/cam/{cam}/snapshot.jpg", snapshot)
+    app.router.add_get("/cam/alarms", card_alarms)
+    app.router.add_get("/cam/shot", card_shot)
+    app.router.add_get("/cam/{cam}/since", card_since)
     SLIDES_DIR.mkdir(exist_ok=True)
     app.router.add_get("/dev/slides", slides)
     app.router.add_static("/slides/", SLIDES_DIR)

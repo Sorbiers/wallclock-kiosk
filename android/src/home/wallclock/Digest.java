@@ -31,15 +31,24 @@ final class Digest {
         this.password = password;
     }
 
-    /** GET the address, logged in. The caller reads the reply and disconnects. */
-    HttpURLConnection get(String address, int readTimeoutMs) throws IOException {
+    /**
+     * GET the address, logged in. The caller reads the reply and disconnects.
+     * One request at a time gets as far as the camera's answer: each login
+     * carries a counter, and the camera refuses (401) a counter that reaches it
+     * out of order, as happens when several pictures are asked for at once.
+     * Only the answer's headers are waited for here; the body is read by the
+     * caller, so downloads still run side by side.
+     */
+    synchronized HttpURLConnection get(String address, int readTimeoutMs) throws IOException {
         HttpURLConnection connection = open(address, readTimeoutMs);
         if (connection.getResponseCode() != HttpURLConnection.HTTP_UNAUTHORIZED) return connection;
         String header = connection.getHeaderField("WWW-Authenticate");
         connection.disconnect();
         if (header == null || !header.startsWith("Digest")) throw new IOException("Camera asked for an unknown login");
         remember(header);
-        return open(address, readTimeoutMs);   // 401 again means the login is wrong
+        connection = open(address, readTimeoutMs);
+        connection.getResponseCode();   // 401 again means the login is wrong
+        return connection;
     }
 
     private HttpURLConnection open(String address, int readTimeoutMs) throws IOException {

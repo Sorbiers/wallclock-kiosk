@@ -3,14 +3,16 @@
 camera: 1 (default) or 2, as numbered in the app's settings. Only the trigger
 is pretended; the pictures and the live view are real.
 
-The tablet's address and the remote-control PIN are remembered in
-tablet.local.txt (not in git): the address is asked from the tablet over USB
-the first time, the PIN from you. After that USB is not needed.
+The tablet's address and your name and PIN for its remote control are
+remembered in tablet.local.txt (not in git): the address is asked from the
+tablet over USB the first time, the name and PIN from you. After that USB is
+not needed.
 """
 
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import tablet
@@ -33,24 +35,26 @@ def tablet_address() -> str:
 def main() -> None:
     camera = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 1
     address = tablet_address()
-    pin = (tablet.remembered() + ["", ""])[1]
+    known = tablet.remembered() + ["", "", ""]
+    pin, user = known[1], known[2] or "home"   # "home": the name the single PIN of earlier versions goes by
     command = json.dumps({"test": True, "cam": camera - 1}).encode()
     for asked in (False, True):
-        request = urllib.request.Request(f"http://{address}:{PORT}/api/command", method="POST",
-                                         headers={"X-Pin": pin}, data=command)
+        request = urllib.request.Request(f"http://{address}:{PORT}/api/command", method="POST", data=command,
+                                         headers={"X-User": urllib.parse.quote(user), "X-Pin": pin})
         try:
             urllib.request.urlopen(request, timeout=8).read()
             break
         except urllib.error.HTTPError as refused:
             if refused.code == 403:
-                sys.exit("The remote control is off: set a PIN in the tablet's settings (gear, General).")
+                sys.exit("The remote control is off, or not open to this network: see the tablet's settings (gear, Remote).")
             if refused.code != 401 or asked:
-                sys.exit(f"The tablet refused the PIN (HTTP {refused.code}).")
-            pin = input("Remote-control PIN: ").strip()
+                sys.exit(f"The tablet refused the name and PIN (HTTP {refused.code}).")
+            user = input(f"Remote-control user name [{user}]: ").strip() or user
+            pin = input("PIN: ").strip()
         except OSError as failed:
             sys.exit(f"Could not reach the tablet at {address}: {failed}\n"
                      f"If its address changed, delete {tablet.REMEMBERED.name} and plug the tablet in.")
-    tablet.remember(address, pin)
+    tablet.remember(address, pin, user)
     print(f"Test alarm sent for camera {camera} to the tablet at {address}.")
 
 

@@ -23,7 +23,8 @@ import java.util.Map;
 
 /**
  * Answers the page's own requests from inside the app: its files come from the
- * bundled assets, "/cam/..." is fetched from a camera with the login, and
+ * bundled assets, "/cam/..." is fetched from a camera with the login (a fresh
+ * snapshot, or the alarms and pictures on its card), and
  * "/slides/..." comes from the slideshow folder and "/media/..." from the
  * folder of what the alarm clock plays. "/feed/..." is fetched from the two
  * services the newspaper page uses that a web page is not let to read.
@@ -59,7 +60,7 @@ final class PageClient extends WebViewClient {
         Uri url = request.getUrl();
         if (!HOST.equals(url.getHost())) return null;
         String path = url.getPath() == null ? "/" : url.getPath();
-        if (path.startsWith("/cam/")) return cameras.snapshot(path);
+        if (path.startsWith("/cam/")) return cameras.answer(url);
         if (path.startsWith("/slides/")) return slide(new File(path).getName());   // the name only: no ".."
         if (path.startsWith("/media/")) return media(new File(path).getName(), header(request, "Range"));
         if (path.startsWith("/feed/")) return feed(url);
@@ -219,22 +220,6 @@ final class PageClient extends WebViewClient {
     }
 
     static String mimeType(String file) {
-        if (file.endsWith(".html")) return "text/html";
-        if (file.endsWith(".js")) return "text/javascript";
-        if (file.endsWith(".css")) return "text/css";
-        if (file.endsWith(".svg")) return "image/svg+xml";
-        if (file.endsWith(".png")) return "image/png";
-        if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
-        if (file.endsWith(".webp")) return "image/webp";
-        if (file.endsWith(".gif")) return "image/gif";
-        if (file.endsWith(".mp3")) return "audio/mpeg";
-        if (file.endsWith(".m4a")) return "audio/mp4";
-        if (file.endsWith(".aac")) return "audio/aac";
-        if (file.endsWith(".ogg")) return "audio/ogg";
-        if (file.endsWith(".wav")) return "audio/wav";
-        if (file.endsWith(".flac")) return "audio/flac";
-        if (file.endsWith(".mp4") || file.endsWith(".m4v")) return "video/mp4";
-        if (file.endsWith(".webm")) return "video/webm";
-        return "application/octet-stream";
+        return Mime.of(file);
     }
 }

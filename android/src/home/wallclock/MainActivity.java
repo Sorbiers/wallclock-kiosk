@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Log;
 import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
@@ -33,8 +34,11 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Locale;
 
 /**
  * The whole app: one full-screen WebView showing the page bundled in assets.
@@ -94,13 +98,13 @@ public class MainActivity extends Activity {
         // chrome://inspect over USB, in debug builds only (build.bat --debug)
         WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 
-        cameras = new Cameras(this::runInPage);
+        cameras = new Cameras(this::runInPage, new File(getFilesDir(), "alarms"));
         web.setWebViewClient(new PageClient(getAssets(), cameras, slides(), media(), this::pageDied));
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(web);
         web.loadUrl(view == null ? PAGE : PAGE + "?view=" + view);
 
-        remote = new Remote(getAssets(), new RemoteHost());
+        remote = new Remote(Remote.PORT, new RemoteHost());
         remote.start();
     }
 
@@ -196,40 +200,98 @@ public class MainActivity extends Activity {
 
     /** What the remote-control page (another device's browser) may do. */
     private final class RemoteHost implements Remote.Host {
-        @Override
-        public String pin() {
-            try {
-                return new JSONObject(settings().getString("config", "{}")).optString("remote_pin").trim();
-            } catch (JSONException unreadable) {
-                return "";
-            }
+        private JSONObject saved() throws JSONException {
+            return new JSONObject(settings().getString("config", "{}"));
         }
 
-        /** The settings, without the camera password and the PIN: they never leave the tablet. */
+        /** The users of the remote control, in the settings as saved or in the JSON given. */
+        private JSONArray users(JSONObject config) {
+            JSONObject remote = config.optJSONObject("remote");
+            JSONArray users = remote == null ? null : remote.optJSONArray("users");
+            return users == null ? new JSONArray() : users;
+        }
+
+        @Override
+        public Remote.Access access() {
+            Remote.Access access = new Remote.Access();
+            try {
+                JSONObject config = saved(), remote = config.optJSONObject("remote");
+                if (remote != null) {
+                    access.lan = remote.optBoolean("lan", true);
+                    access.also = remote.optString("also");
+                }
+                JSONArray users = users(config);
+                for (int i = 0; i < users.length(); i++) {
+                    JSONObject user = users.optJSONObject(i);
+                    if (user == null) continue;
+                    String name = user.optString("name").trim(), pin = user.optString("pin").trim();
+                    if (!name.isEmpty() && !pin.isEmpty()) access.users.put(name.toLowerCase(Locale.ROOT), pin);
+                }
+                // From before there were users: the one PIN, under the name "home".
+                String old = config.optString("remote_pin").trim();
+                if (access.users.isEmpty() && !old.isEmpty()) access.users.put("home", old);
+            } catch (JSONException unreadable) {
+                // nobody gets in
+            }
+            return access;
+        }
+
+        @Override
+        public InputStream asset(String name) throws IOException {
+            return getAssets().open(name);
+        }
+
+        /** The settings, without the camera password and the PINs: they never leave the tablet. */
         @Override
         public String config() {
             try {
-                return new JSONObject(settings().getString("config", "{}"))
-                        .put("camera_password", "").put("remote_pin", "").toString();
+                JSONObject config = saved().put("camera_password", "").put("remote_pin", "");
+                JSONArray users = users(config);
+                for (int i = 0; i < users.length(); i++) {
+                    JSONObject user = users.optJSONObject(i);
+                    if (user != null) user.put("pin", "");
+                }
+                return config.toString();
             } catch (JSONException unreadable) {
                 return "";
             }
         }
 
-        /** An empty password or PIN means "unchanged". Then the page restarts with the new settings. */
+        /**
+         * Settings saved from the remote control. An empty camera password
+         * means "unchanged". Who may use the remote control (the networks, the
+         * users and their PINs) is decided on the tablet only: that part stays
+         * as it is, whatever was sent. Then the page restarts with the new settings.
+         */
         @Override
         public void saveConfig(String json) {
             try {
-                JSONObject next = new JSONObject(json);
-                JSONObject current = new JSONObject(settings().getString("config", "{}"));
-                for (String secret : new String[] {"camera_password", "remote_pin"}) {
-                    if (next.optString(secret).isEmpty()) next.put(secret, current.optString(secret));
-                }
+                JSONObject next = new JSONObject(json), current = saved();
+                if (next.optString("camera_password").isEmpty()) next.put("camera_password", current.optString("camera_password"));
+                next.remove("remote");
+                if (current.has("remote")) next.put("remote", current.get("remote"));
+                next.put("remote_pin", current.optString("remote_pin"));
                 settings().edit().putString("config", next.toString()).apply();
                 runInPage("location.reload()");
             } catch (JSONException rejected) {
                 // not settings: ignore
             }
+        }
+
+        /** The camera alarms of the last day, from the tablet's copies of the cameras' own pictures. */
+        @Override
+        public String alarms() {
+            return cameras.alarms();
+        }
+
+        @Override
+        public byte[] shot(String file, boolean small) {
+            return cameras.picture(file, small);
+        }
+
+        @Override
+        public void log(String message) {
+            Log.w("WallClock", message);
         }
 
         @Override

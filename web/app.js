@@ -45,8 +45,9 @@
     },
     views: { camera_timeout_minutes: 10, weather_timeout_minutes: 0, buttons_hide_seconds: 6 },
     alarm: {
-      min_total_seconds: 60, min_picture_seconds: 10, min_pictures: 3, max_pictures: 12,
-      capture_interval_seconds: 5, sound: true, codes: ["CrossLineDetection", "CrossRegionDetection"],
+      min_total_seconds: 60, min_picture_seconds: 10, max_pictures: 12,
+      codes: ["CrossLineDetection", "CrossRegionDetection"],
+      sound: "beep", sound_seconds: 1, volume: -1,   // sound: "none", "beep" or one of SOUNDS; volume -1 = as the tablet is set
     },
     slides: {
       seconds: 8, transition: "random", motion: true, clock: true,
@@ -59,7 +60,11 @@
       volume: 0.6, rise: 0, media: "", youtube: "", plays: 3, max_seconds: 600 })),
     camera_user: "",
     camera_password: "",
-    remote_pin: "",   // the remote control works only while a PIN is set
+    remote_pin: "",   // from before the remote control had users: it becomes the first one's PIN
+    remote: {         // who may use the remote control: networks, and users by name and PIN (none = it is off)
+      lan: true, also: "",
+      users: [0, 1, 2, 3, 4].map(() => ({ name: "", pin: "" })),
+    },
     cameras: [
       { name: "Camera 1", host: "", stream: 0 },
       { name: "Camera 2", host: "", stream: 0 },
@@ -131,28 +136,23 @@
     return api("/api/command", JSON.stringify(what));
   }
 
-  // Remote side: every request carries the PIN, kept in this browser. The
-  // tablet answers 401 when it is missing or wrong, and we ask for it.
+  // Remote side: every request carries the user's name and PIN, kept in this
+  // browser by the remote-control page (remote.js), where signing in happens.
+  // When the tablet refuses them, this page gives way to that one, which says why.
+  const HOME = document.body.dataset.home || "/";
+  const signedAs = () => ({
+    "X-User": encodeURIComponent(localStorage.getItem("kiosk-user") || "home"),
+    "X-Pin": localStorage.getItem("kiosk-pin") || "",
+  });
   let pinWorks = false;
   async function api(path, body) {
-    for (;;) {
-      const options = { headers: { "X-Pin": localStorage.getItem("kiosk-pin") || "" } };
-      if (body != null) { options.method = "POST"; options.body = body; }
-      const reply = await fetch(path, options);
-      pinWorks = reply.ok;
-      if (reply.ok) return reply.text();
-      if (reply.status === 403) {
-        alert("The remote control is off. Set a PIN in the settings on the tablet itself (gear, General).");
-        throw new Error("remote control is off");
-      }
-      if (reply.status === 429) {
-        alert("Too many wrong PINs. Try again in a minute.");
-        throw new Error("locked");
-      }
-      const pin = prompt("PIN for the wall clock");
-      if (pin === null) throw new Error("no PIN given");
-      localStorage.setItem("kiosk-pin", pin.trim());
-    }
+    const options = { headers: signedAs() };
+    if (body != null) { options.method = "POST"; options.body = body; }
+    const reply = await fetch(path, options);
+    pinWorks = reply.ok;
+    if (reply.ok) return reply.text();
+    if (reply.status < 500) location.replace(HOME);
+    throw new Error("the tablet answered " + reply.status);
   }
   // Colour pickers on the remote page: each change is shown on the tablet at
   // once, in the mode the colour belongs to (so a night colour can be judged by
@@ -191,6 +191,7 @@
     if (what.ring) ring(what.ring);
     if (what.preview) preview(what.preview);
     if (what.restart && native.restart) native.restart();
+    if (what.snooze && ringing) stopRinging(SNOOZE_MIN);
     if (what.stop) {
       if (ringing) stopRinging(0);
       if (alarm.open) closeAlarm(true);
@@ -514,6 +515,7 @@
 
   // The clock page shown between pictures (slides.clock_every); the mode stays Slides.
   function interlude(on) {
+    if (view !== "slides") return;   // the slideshow has been left: no page of its own may come up
     ss.interlude = on;
     ss.fading = false;
     $("view-slides").hidden = on;
@@ -536,6 +538,7 @@
   }
 
   async function startSlides() {
+    stopSlides();   // also when it is running already (Slides tapped again): its timers must not live on beside the new ones
     const run = ++ss.run;
     ss.count = 0;
     ss.interlude = false;
@@ -1182,8 +1185,14 @@
 
   // --- camera alarms ---------------------------------------------------------
   // The native side reports each camera rule starting and stopping. When an
-  // alarm rule starts, pictures are taken from that camera for as long as it
-  // stays triggered and shown as they arrive.
+  // alarm rule starts, the alarm comes up at once over whatever is showing:
+  // a sound, that camera live, and beside it the pictures the camera itself
+  // takes of the alarm, shown in turn as they reach its SD card. The same
+  // pictures make up the Events page.
+  const ALARM_ASK_MS = 3000;       // how often the card is asked for new pictures during an alarm
+  const ALARM_BEFORE_MS = 20000;   // pictures from this long before the news count too
+  const ALARM_AFTER_MS = 12000;    // and the card is asked this long after the rule has stopped
+  const ALARM_WATCH_MS = 120000;   // but never longer than this for one alarm
   const cameraState = {};   // camera index -> { active: Set of running rules, alarm: the one being recorded, online }
   const alarm = { open: false, events: new Set(), seen: new Map(), dismissed: new Set(), pics: [], idx: -1, shownAt: 0, openedAt: 0 };
 
@@ -1219,21 +1228,36 @@
       time: pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds()),
     };
     state.alarm = ev;
-    if (a.sound) play(CAMERA_BEEP);
-    onAlarm(ev);                      // the screen reacts before the first picture
-    let failures = 0;
-    while (ev.pictures.length < a.max_pictures && failures < 3 && !alarm.dismissed.has(ev.id)) {
-      const started = Date.now();
+    soundAlarm();
+    onAlarm(ev);                      // the screen reacts at once: the camera live, and its pictures as they come
+    // The camera writes its own pictures of the alarm to its card within
+    // seconds. The app is asked again and again to copy what is new there,
+    // while the rule stays triggered and for a while after; a little back in
+    // time too, since the camera's clock and the first picture may be ahead
+    // of the news.
+    const seen = new Set();
+    let since = now.getTime() - ALARM_BEFORE_MS, calmSince = 0;
+    if (code === TEST_CODE) {   // a test: nothing has really happened, so the camera's latest alarm stands in
       try {
-        const r = await fetch("/cam/" + index + "/snapshot.jpg?t=" + started, { cache: "no-store" });
-        if (!r.ok) throw new Error(r.status);
-        const picture = await r.blob();
-        ev.pictures.push(URL.createObjectURL(picture));
-        keepShot(ev, picture);        // for the Events page; the alarm does not wait for it
-        onAlarm(ev);
-      } catch (e) { failures++; }
-      if (!state.active.size && ev.pictures.length >= a.min_pictures) break;
-      await sleep(Math.max(0, a.capture_interval_seconds * 1000 - (Date.now() - started)));
+        const latest = (await (await fetch("/cam/alarms")).json()).alarms.find((entry) => entry.cam === index);
+        if (latest) since = latest.at - 1000;
+      } catch (e) { /* then the test shows the live view alone */ }
+    }
+    while (ev.pictures.length < a.max_pictures && !alarm.dismissed.has(ev.id) && Date.now() - now.getTime() < ALARM_WATCH_MS) {
+      try {
+        const reply = await fetch("/cam/" + index + "/since?ms=" + since, { cache: "no-store" });
+        if (!reply.ok) throw new Error(reply.status);
+        const fresh = (await reply.json()).filter((one) => !seen.has(one.file)).slice(0, a.max_pictures - ev.pictures.length);
+        fresh.forEach((one) => {
+          seen.add(one.file);
+          ev.pictures.push(shotUrl(one, "full"));
+        });
+        if (fresh.length) onAlarm(ev);
+      } catch (e) { /* no answer just now: the next round may do better */ }
+      if (state.active.size) calmSince = 0;
+      else if (!calmSince) calmSince = Date.now();
+      else if (Date.now() - calmSince > ALARM_AFTER_MS) break;
+      await sleep(ALARM_ASK_MS);
     }
     ev.active = false;
     state.alarm = null;
@@ -1275,11 +1299,11 @@
     $("alarm-count").textContent = pic ? (alarm.idx + 1) + " / " + alarm.pics.length : "";
   }
 
-  // Upright tablet: the alarmed camera plays live under the pictures.
+  // The alarmed camera plays live beside the pictures (under them when the tablet is upright).
   let alarmLive = null;   // { cam, stream, retry } while it plays
 
   function syncAlarmLive(wanted) {
-    const cam = alarm.open && upright.matches ? wanted : -1;
+    const cam = alarm.open ? wanted : -1;
     if (alarmLive && alarmLive.cam === cam) return;
     if (alarmLive) {
       clearTimeout(alarmLive.retry);
@@ -1315,7 +1339,8 @@
     const n = alarm.pics.length, now = Date.now();
     const active = Array.from(alarm.events).some((ev) => ev.active);
     if (!n) {
-      if (!active && now - alarm.openedAt > 5000) closeAlarm(false);   // the camera gave no picture
+      // No picture (a camera without a card, say): the live view alone stays for the time an alarm is due.
+      if (!active && now - alarm.openedAt > cfg.alarm.min_total_seconds * 1000) closeAlarm(false);
       return;
     }
     if (alarm.idx < 0) return showPicture(0);
@@ -1326,7 +1351,34 @@
   }
 
   // Back to whatever view was showing; Cancel also drops the rest of this alarm.
+  // The sound of a camera alarm: the chosen one, again and again for
+  // alarm.sound_seconds (at least once), at alarm.volume: a share of the loudest
+  // the tablet can do, or as the tablet is set when none is given. It falls
+  // silent when the alarm is cancelled. While the alarm clock rings, the volume
+  // is the alarm clock's.
+  let alarmSound = null;   // the timer repeating it
+  function soundAlarm() {
+    const a = cfg.alarm, sound = a.sound === "beep" ? { notes: CAMERA_BEEP, every: 1.5 } : SOUNDS[a.sound];
+    quietAlarm();
+    if (!sound) return;
+    const own = a.volume >= 0 && !ringing;
+    if (own && native.setVolume) native.setVolume(Math.min(1, a.volume));
+    const gain = own && !native.setVolume ? Math.min(1, a.volume) : 1;
+    const until = Date.now() + Math.max(0, a.sound_seconds) * 1000;
+    play(sound.notes, gain);
+    alarmSound = setInterval(() => {
+      if (Date.now() + sound.every * 500 < until) play(sound.notes, gain); else quietAlarm();
+    }, sound.every * 1000);
+  }
+  function quietAlarm() {
+    if (!alarmSound) return;
+    clearInterval(alarmSound);
+    alarmSound = null;
+    if (native.setVolume && !ringing) native.setVolume(-1);   // the tablet's volume as it was
+  }
+
   function closeAlarm(dismiss) {
+    quietAlarm();
     alarm.events.forEach((ev) => {
       if (dismiss) alarm.dismissed.add(ev.id);
       alarm.seen.delete(ev.id);
@@ -1351,93 +1403,56 @@
     $("status").hidden = !offline.length;
   }
 
-  // --- camera events of the last 24 hours -------------------------------------
-  // Every alarm picture is also kept on this device (IndexedDB), shrunk to
-  // screen size plus a thumbnail, and dropped a day later. The Events page
-  // lists the alarms, newest first; a tap on a picture opens it full screen.
-  const HISTORY_MS = 24 * 3600 * 1000;
-  const SHOT_WIDTH = 1280, THUMB_WIDTH = 360;
-  let shotsOpening = null;
-
-  function shotsDb() {
-    if (!shotsOpening) {
-      shotsOpening = new Promise((done, fail) => {
-        const opening = indexedDB.open("wallclock", 1);
-        opening.onupgradeneeded = () => opening.result.createObjectStore("shots", { autoIncrement: true }).createIndex("at", "at");
-        opening.onsuccess = () => done(opening.result);
-        opening.onerror = () => fail(opening.error);
-      });
-    }
-    return shotsOpening;
-  }
-
-  function scaled(bitmap, width) {   // a JPEG of the picture, no wider than `width`
-    const canvas = document.createElement("canvas");
-    const scale = Math.min(1, width / bitmap.width);
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    const pen = canvas.getContext("2d");
-    pen.imageSmoothingQuality = "high";
-    pen.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    return new Promise((done) => canvas.toBlob(done, "image/jpeg", 0.8));
-  }
-
-  async function keepShot(ev, picture) {
-    try {
-      const bitmap = await createImageBitmap(picture);
-      const shot = {
-        event: ev.id, at: Date.now(), cam: ev.cam, name: ev.name, codes: ev.codes.slice(),
-        picture: (await scaled(bitmap, SHOT_WIDTH)) || picture, thumb: (await scaled(bitmap, THUMB_WIDTH)) || picture,
-      };
-      bitmap.close();
-      const store = (await shotsDb()).transaction("shots", "readwrite").objectStore("shots");
-      store.add(shot);
-      store.index("at").openCursor(IDBKeyRange.upperBound(Date.now() - HISTORY_MS)).onsuccess = (found) => {
-        const cursor = found.target.result;   // older than a day: gone
-        if (cursor) { cursor.delete(); cursor.continue(); }
-      };
-      store.transaction.oncomplete = () => { if (view === "events" && !alarm.open) renderEvents(); };
-    } catch (e) { /* no history on this device; the alarm itself is not affected */ }
-  }
-
-  async function loadEvents() {   // one list of pictures per alarm, the newest alarm first
-    const index = (await shotsDb()).transaction("shots").objectStore("shots").index("at");
-    const shots = await new Promise((done, fail) => {
-      const asked = index.getAll(IDBKeyRange.lowerBound(Date.now() - HISTORY_MS));
-      asked.onsuccess = () => done(asked.result);
-      asked.onerror = () => fail(asked.error);
-    });
-    const byAlarm = new Map();
-    shots.forEach((one) => byAlarm.set(one.event, (byAlarm.get(one.event) || []).concat(one)));
-    return Array.from(byAlarm.values()).reverse();
-  }
-
-  const thumbUrls = [];   // object URLs of the thumbnails on the page
-  const shot = { list: [], idx: 0, url: null };   // the picture opened full screen
+  // --- camera alarms of the last 24 hours -----------------------------------------
+  // The cameras take pictures themselves when one of their rules fires, and
+  // keep them on their SD cards. The app copies those to the tablet and keeps
+  // them for a day (Cameras in the app): "/cam/alarms" lists the alarms, the
+  // newest first, "/cam/shot" is one picture, small or in full. So the list
+  // shows at once, without the cameras, and is whole whether or not this page
+  // was awake when it happened.
+  const EVENTS_AGAIN_MS = 60000;   // an open page asks again this often
+  const shot = { entry: null, idx: 0 };   // the picture opened full screen
+  let eventsAsked = 0;
+  let eventsShown = null;   // what the list was last built from, as text: it is rebuilt only when that changes
+  let eventsAt = 0;
+  const shotUrl = (one, size) => "/cam/shot?size=" + size + "&file=" + encodeURIComponent(one.file);
 
   async function renderEvents() {
-    let alarms = [];
-    try { alarms = await loadEvents(); } catch (e) { /* no history on this device */ }
-    if (view !== "events") return;
-    const list = $("ev-list"), today = new Date().toDateString();
-    thumbUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
+    const asked = ++eventsAsked;
+    eventsAt = Date.now();
+    if (!$("ev-list").children.length) {
+      $("ev-empty").textContent = "Looking";
+      $("ev-empty").hidden = false;
+    }
+    let told = null, text = "";
+    try {
+      const reply = await fetch("/cam/alarms");
+      if (!reply.ok) throw new Error(reply.status);
+      text = await reply.text();
+      told = JSON.parse(text);
+    } catch (e) { /* said below */ }
+    if (view !== "events" || asked !== eventsAsked || (told && text === eventsShown)) return;
+    eventsShown = told ? text : null;
+    const list = $("ev-list"), today = new Date().toDateString(), entries = told ? told.alarms : [];
     list.textContent = "";
-    $("ev-empty").hidden = alarms.length > 0;
-    $("ev-title").textContent = "Camera alarms \u00B7 last 24 hours" + (alarms.length ? " \u00B7 " + alarms.length : "");
-    alarms.forEach((shots) => {
-      const when = new Date(shots[0].at);
+    $("ev-empty").hidden = entries.length > 0;
+    $("ev-empty").textContent = told ? "No camera alarms in the last 24 hours." : "The list could not be read.";
+    $("ev-title").textContent = "Camera alarms \u00B7 last 24 hours" + (entries.length ? " \u00B7 " + entries.length : "")
+      + (told && told.failed.length ? " \u00B7 no answer from " + told.failed.join(", ") : "");
+    entries.forEach((entry) => {
+      const when = new Date(entry.at);
       const meta = el("div", "ev-meta");
       meta.append(
         el("div", "ev-time", pad(when.getHours()) + ":" + pad(when.getMinutes())),
-        el("div", "ev-cam", shots[0].name),
-        el("div", "ev-what", (when.toDateString() === today ? "" : "Yesterday \u00B7 ") + labelOf(shots[shots.length - 1].codes)));
+        el("div", "ev-cam", entry.name),
+        el("div", "ev-what", (when.toDateString() === today ? "" : "Yesterday \u00B7 ") + labelOf(entry.codes)));
       const strip = el("div", "ev-strip");
-      shots.forEach((one, i) => {
+      entry.shots.forEach((one, i) => {
         const img = el("img");
         img.alt = "";
         img.loading = "lazy";
-        thumbUrls.push(img.src = URL.createObjectURL(one.thumb));
-        img.addEventListener("click", () => openShot(shots, i));
+        img.src = shotUrl(one, "thumb");
+        img.addEventListener("click", () => openShot(entry, i));
         strip.appendChild(img);
       });
       const row = el("article", "ev");
@@ -1446,21 +1461,23 @@
     });
   }
 
-  function openShot(shots, i) {
-    shot.list = shots;
-    $("shot-prev").hidden = $("shot-next").hidden = shots.length < 2;
+  function checkEvents() {   // from the clock tick
+    if (view === "events" && $("shot").hidden && Date.now() - eventsAt > EVENTS_AGAIN_MS) renderEvents();
+  }
+
+  function openShot(entry, i) {
+    shot.entry = entry;
+    $("shot-prev").hidden = $("shot-next").hidden = entry.shots.length < 2;
     $("shot").hidden = false;
     showShot(i);
   }
 
   function showShot(i) {   // steps round within the one alarm
-    const n = shot.list.length;
+    const n = shot.entry.shots.length;
     shot.idx = (i + n) % n;
-    const one = shot.list[shot.idx], when = new Date(one.at);
-    if (shot.url) URL.revokeObjectURL(shot.url);
-    shot.url = URL.createObjectURL(one.picture);
-    $("shot-img").src = shot.url;
-    $("shot-caption").textContent = one.name + " \u00B7 " + labelOf(one.codes) + " \u00B7 "
+    const one = shot.entry.shots[shot.idx], when = new Date(one.at);
+    $("shot-img").src = shotUrl(one, "full");
+    $("shot-caption").textContent = shot.entry.name + " \u00B7 " + labelOf(shot.entry.codes) + " \u00B7 "
       + pad(when.getHours()) + ":" + pad(when.getMinutes()) + ":" + pad(when.getSeconds());
     $("shot-count").textContent = (shot.idx + 1) + " / " + n;
   }
@@ -1468,15 +1485,13 @@
   function closeShot() {
     $("shot").hidden = true;
     $("shot-img").removeAttribute("src");
-    if (shot.url) URL.revokeObjectURL(shot.url);
-    shot.url = null;
-    shot.list = [];
+    shot.entry = null;
   }
 
   function closeEvents() {   // leaving the page: let go of its pictures
     closeShot();
-    thumbUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
     $("ev-list").textContent = "";
+    eventsShown = null;
   }
 
   $("shot-prev").addEventListener("click", () => showShot(shot.idx - 1));
@@ -1534,8 +1549,9 @@
 
   // An alarm's volume is a share of the loudest the tablet can do: the tablet's
   // own volume is set for as long as the alarm rings and put back afterwards,
-  // so it sounds the same whatever the tablet was set to. Where that cannot be
-  // done (a desktop browser), the page turns its own sound down instead.
+  // so it sounds the same whatever the tablet was set to. With no volume given
+  // the tablet's is left as it is. Where the tablet's volume cannot be set (a
+  // desktop browser), the page turns its own sound down instead.
   const loudness = (how) => (how.volume >= 0 ? Math.min(1, how.volume) : 1);
   // "Volume rises over": the alarm starts quiet and swells to its volume. The
   // page turns its own sound up for this, which is smoother than the tablet's
@@ -1570,7 +1586,7 @@
     ringing = true;
     ringStarted = Date.now();
     if (how.rise > 0) swellTimer = setInterval(() => turnUp(how), 500);
-    if (native.setVolume) native.setVolume(loudness(how));
+    if (native.setVolume && how.volume >= 0) native.setVolume(loudness(how));
     const video = youtubeId(how.youtube), kind = video ? "youtube" : mediaKind(how.media);
     $("wake").classList.toggle("with-video", kind === "video" || kind === "youtube");
     $("wake").classList.toggle("with-picture", kind === "picture");
@@ -1708,6 +1724,10 @@
   const SOUND_NAMES = Object.keys(SOUNDS).map((key) => [key, SOUNDS[key].name]);
   const HINTS = {
     Slideshow: "Pictures come from the slides folder on the PC: run sync-slides.bat, then tap Slides to load them.",
+    Remote: "The remote control is a page the tablet serves to a PC or phone on the networks allowed here. "
+      + "Whoever is listed signs in there with name and PIN; with nobody listed it is off. Away from home, come in "
+      + "through a VPN, and name its network here if its addresses are not the home ones. "
+      + "All of this can only be changed here, on the tablet.",
     News: "Everything on the News page comes from free services on the internet. Only what is switched on here is "
       + "fetched; if more is on than fits, the page scrolls.",
     "Alarm clock": "Music, videos and pictures come from the media folder on the PC: run sync-media.bat. "
@@ -1726,7 +1746,6 @@
     ["General", [
       ["locale", "Date language", [["en-CA", "English"], ["fr-CA", "Fran\u00E7ais"], ["ru-RU", "\u0420\u0443\u0441\u0441\u043A\u0438\u0439"]]],
       ["views.buttons_hide_seconds", "Hide the buttons after, s", "number", number],
-      ["remote_pin", "Remote control PIN (empty = remote control off)", "text"],
       ["night.by", "Night mode", [["time", "By the clock"], ["dark", "When the room is dark"]]],
       ["night.dark_lux", "\u2026night when the room is darker than, lux", "number", number],
       ["night.light_lux", "\u2026day again when it is lighter than, lux", "number", number],
@@ -1762,9 +1781,10 @@
       ["cameras.1.stream", "Camera 2 video", STREAMS, number],
       ["alarm.min_total_seconds", "Alarm stays on screen at least, s", "number", number],
       ["alarm.min_picture_seconds", "Each alarm picture at least, s", "number", number],
-      ["alarm.min_pictures", "Pictures per alarm, at least", "number", number],
       ["alarm.max_pictures", "Pictures per alarm, at most", "number", number],
-      ["alarm.sound", "Short beep on a camera alarm", "checkbox"],
+      ["alarm.sound", "Sound on a camera alarm", [["none", "None"], ["beep", "Short beep"]].concat(SOUND_NAMES)],
+      ["alarm.sound_seconds", "\u2026plays for, s", "number", number],
+      ["alarm.volume", "\u2026volume, % of the loudest (empty = as the tablet is set)", "number", percent],
     ]],
     ["Slideshow", [
       ["slides.seconds", "Each picture, s", "number", number],
@@ -1778,6 +1798,13 @@
       ["slides.auto_start", "Start by itself at (empty = off)", "time"],
       ["slides.auto_stop", "Back to the clock at", "time"],
     ]],
+    ["Remote", [
+      ["remote.lan", "Allow from the home network (the tablet's own /24)", "checkbox"],
+      ["remote.also", "Also allow from (a VPN's network, e.g. 10.8.0.0/24)", "text"],
+    ].concat([0, 1, 2, 3, 4].reduce((rows, i) => rows.concat([
+      ["remote.users." + i + ".name", "User " + (i + 1), "text"],
+      ["remote.users." + i + ".pin", "PIN", "password"],
+    ]), []))],
     ["News", [
       ["news.cards.usdcad", "USD / CAD", "checkbox"],
       ["news.cards.btc", "Bitcoin", "checkbox"],
@@ -1807,11 +1834,13 @@
       ["clock_alarms." + i + ".plays", "Music or video plays, times", "number", number],
       ["clock_alarms." + i + ".max_seconds", "\u2026for at most, s", "number", number],
       ["clock_alarms." + i + ".youtube", "or a YouTube link", "text"],
-      ["clock_alarms." + i + ".volume", "Volume, % of the loudest", "number", percent],
+      ["clock_alarms." + i + ".volume", "Volume, % of the loudest (empty = as set)", "number", percent],
       ["clock_alarms." + i + ".rise", "Volume rises over, s (0 = at once)", "number", number],
     ].map((field) => [field[0], field[1], field[2], field[3], Object.assign({ group: i }, field[4])])), []), "three"],
   ];
   const FIELDS = SETTINGS.reduce((all, tab) => all.concat(tab[1]), []);
+  // Who may use the remote control is the tablet's own business: its page of settings has no such tab.
+  const TABS = REMOTE ? SETTINGS.filter((tab) => tab[0] !== "Remote") : SETTINGS;
   let settingsTab = 0;
   let openGroup = 0;   // the alarm unfolded on the Alarm clock tab; -1 = all folded
 
@@ -1829,7 +1858,7 @@
     form.textContent = "";
     tabs.textContent = "";
     const media = native.listMedia().catch(() => []);   // asked once for all the alarms
-    SETTINGS.forEach((tab, index) => {
+    TABS.forEach((tab, index) => {
       const button = el("button", "", tab[0]);
       button.type = "button";
       button.addEventListener("click", () => { settingsTab = index; showSettingsTab(); });
@@ -1869,7 +1898,7 @@
         else input.value = convert ? convert.show(value) : value == null ? "" : value;
         input.dataset.path = path;
         if (REMOTE && kind === "color") input.addEventListener("input", () => sendPreview(path, input.value));
-        if (REMOTE && (kind === "password" || path === "remote_pin")) input.placeholder = "unchanged";   // never sent out
+        if (REMOTE && kind === "password") input.placeholder = "unchanged";   // never sent out
         row.append(el("span", "", field[1]), input);
         if (extra.button) {
           const button = el("button", "field-action", extra.button[0]);
@@ -1909,12 +1938,12 @@
   function showSettingsTab() {
     Array.from($("settings-tabs").children).forEach((b, i) => b.classList.toggle("active", i === settingsTab));
     Array.from($("settings-form").children).forEach((box, i) => { box.hidden = i !== settingsTab; });
-    $("settings-hint").textContent = HINTS[SETTINGS[settingsTab][0]] || "";
-    $("settings-test").hidden = SETTINGS[settingsTab][0] !== "Cameras";
+    $("settings-hint").textContent = HINTS[TABS[settingsTab][0]] || "";
+    $("settings-test").hidden = TABS[settingsTab][0] !== "Cameras";
     const address = native.remoteAddress ? native.remoteAddress() : "";
     $("settings-remote").textContent = !address ? ""
-      : cfg.remote_pin ? "Remote control from a PC or phone on this Wi-Fi: " + address
-      : "Remote control is off. Set a PIN on the General tab to use it from a PC or phone.";
+      : cfg.remote.users.some((user) => user.name && user.pin) ? "Remote control from a PC or phone on this Wi-Fi: " + address
+      : "Remote control is off. List a user on the Remote tab to use it from a PC or phone.";
     if (BUILD) $("settings-build").textContent = "App built " + BUILD;
   }
 
@@ -1944,6 +1973,8 @@
   // Remote page: the settings as a file, and back. The camera password and the
   // PIN never leave the tablet, so the file has neither; a restore keeps the
   // ones the tablet has.
+  $("settings-home").hidden = !REMOTE;   // back to the remote control, where this page was opened from
+  $("settings-home").addEventListener("click", () => { location.href = HOME; });
   $("settings-backup").hidden = $("settings-restore").hidden = !REMOTE;
   $("settings-backup").addEventListener("click", () => {
     const link = el("a");
@@ -2019,9 +2050,11 @@
   function reportState() {
     if (!native.report) return;
     const state = JSON.stringify({
-      view: view, night: night, ringing: ringing, alarm: alarm.open,
+      view: view, night: night, ringing: ringing, snoozed: !!snoozeUntil,
+      alarm: alarm.open, alarmText: alarm.open ? $("alarm-caption").textContent : "",
       offline: cfg.cameras.filter((cam, i) => cam.host && cameraState[i] && !cameraState[i].online).map((cam) => cam.name),
-      lux: native.lux ? Math.round(native.lux()) : -1, build: BUILD,
+      weather: Array.from($("clock-wx").children).map((part) => part.textContent.trim()).join(" "),
+      lux: native.lux ? Math.round(native.lux()) : -1, locale: cfg.locale, build: BUILD,
     });
     if (state !== reported) native.report(reported = state);
   }
@@ -2032,9 +2065,9 @@
   async function watchTablet() {
     if (pinWorks && document.visibilityState === "visible") {
       try {
-        const reply = await fetch("/api/state", { headers: { "X-Pin": localStorage.getItem("kiosk-pin") || "" } });
+        const reply = await fetch("/api/state", { headers: signedAs() });
         if (reply.status === 401 || reply.status === 429) pinWorks = false;
-        tablet = reply.ok ? JSON.parse(await reply.text()) : null;
+        tablet = reply.ok ? JSON.parse(await reply.text()).tablet : null;
       } catch (e) { tablet = null; }
       showTablet();
     }
@@ -2086,6 +2119,12 @@
         if (!saved.night || saved.night.light_lux == null) cfg.night.light_lux = cfg.night.dark_lux * 2;
       }
     } catch (e) { /* first run, or unreadable settings: defaults */ }
+    if (typeof cfg.alarm.sound === "boolean") cfg.alarm.sound = cfg.alarm.sound ? "beep" : "none";   // it was a switch once
+    // The remote control's list of users: always five rows, and the single PIN
+    // of earlier settings becomes the first user's, under the name "home".
+    cfg.remote.users = [0, 1, 2, 3, 4].map((i) => Object.assign({ name: "", pin: "" }, cfg.remote.users[i]));
+    if (cfg.remote_pin && !cfg.remote.users.some((user) => user.name)) cfg.remote.users[0] = { name: "home", pin: cfg.remote_pin };
+    cfg.remote_pin = "";
     // Alarms saved before each had its own sound, media and timings get them now.
     cfg.clock_alarms = cfg.clock_alarms.map((a) => Object.assign({
       seconds: cfg.wake.seconds, rounds: cfg.wake.rounds, volume: 0.6, rise: 0,
@@ -2121,6 +2160,7 @@
     reportState();
     checkRestart();
     checkPaper();
+    checkEvents();
   }, 500);
   window.addEventListener("online", loadWeather);
   start();

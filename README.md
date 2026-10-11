@@ -15,8 +15,11 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   when the weather is about to change. Upright, the hours stack over the minutes.
 - **Camera** — live video straight from the cameras; a tap steps through all
   cameras and each one alone.
-- **Events** — the camera alarms of the last 24 hours with their pictures; a tap
-  opens a picture full screen.
+- **Events** — the camera alarms of the last 24 hours with the pictures the
+  cameras took themselves. The app copies them from the cameras' SD cards and
+  keeps them for a day, so the list shows at once, is whole whether or not the
+  tablet was awake, and does not need the cameras; a tap opens a picture full
+  screen.
 - **Weather** — now, the next 24 hours and 7 days (Open-Meteo; in Canada the
   current conditions come from an Environment Canada station).
 - **News** — a newspaper page: small charts of USD/CAD, bitcoin, the Bank of
@@ -31,17 +34,19 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
 - **Slides** — a slideshow of your own pictures, optionally on a daily schedule
   and with the clock page in between.
 - **Camera alarms** — when a camera's tripwire or intrusion rule fires, pictures
-  from that camera appear over whatever is showing, with an optional short beep.
-  Upright, the camera also plays live underneath.
+  from that camera appear over whatever is showing, with a sound of your choice
+  (or none), for as long and as loud as you set. Upright, the camera also plays
+  live underneath.
 - **Alarm clock** — four alarms, daily, on weekdays, at weekends or just once;
   each rings a sound of its own choice or plays a YouTube link, music or a video
   from the tablet, or shows a picture. Snooze and Stop.
 - **Night mode** — its own colour and backlight, by the clock or when the room
   is dark (light sensor).
-- **Remote control** — a page served by the tablet itself (`http://<tablet>:8080`)
-  to switch modes and edit every setting from a PC or phone. It shows what the
-  tablet is doing, and saves the settings to a file or restores them from one
-  (without the camera password and the PIN, which never leave the tablet).
+- **Remote control** — a page served by the tablet itself (`http://<tablet>:8080`),
+  made like a TV remote: what the wall clock is doing, keys to switch its page
+  and to stop an alarm, the list of camera alarms with their pictures, and a
+  Settings key to every setting (which can also save the settings to a file
+  and restore them; the camera password and the PINs never leave the tablet).
 - **Kiosk** — full screen, screen always on, landscape or portrait; can be the
   tablet's Home app so it starts by itself. It restarts itself every night and
   whenever its page dies; the settings show when the app was built.
@@ -55,14 +60,19 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
 - **Tablet: Android 11 or newer** with a current system WebView. Developed and
   tested on one device, a Lenovo Tab M9 (Android 13), with two Amcrest 5 MP
   cameras; there it plays both full-resolution streams at about 20 frames a second.
-- **The remote control needs a PIN** that you set on the tablet; without one it
-  is off. It is plain HTTP on your own Wi-Fi, so treat the PIN as a lock
-  against other people in the house, not against a determined attacker. The
-  camera password is never sent to it.
+- **The remote control needs a user**, with a name and a PIN, listed in the
+  tablet's settings; with nobody listed it is off. It answers only the tablet's
+  own /24 network and the networks you add there (a VPN's, say). It is plain
+  HTTP, so do not forward its port from the Internet, and treat the PIN as a
+  lock against other people in the house, not against a determined attacker.
+  The camera password and the PINs are never sent to it.
 - The camera login is stored on the tablet in the app's private settings: use a
-  view-only camera user.
+  camera user that can only view. For the Events page that user must also be
+  allowed to search the camera's recordings, and the camera must have an SD
+  card and be set to save a picture when a rule fires.
 - The cameras are only read; nothing on them is changed.
-- A hobby project: lightly tested, no automated tests, English interface.
+- A hobby project: lightly tested, English interface. The one automated test,
+  `python tools/test_remote.py`, checks who the remote control lets in.
 
 ## Building and installing
 
@@ -78,7 +88,7 @@ script calls the SDK tools directly.
 | `sync-media.bat [folder]` | Copies what the alarm clock can play (default: `media\`): music, videos, pictures |
 | `wifi-on.bat` | Lets the scripts above reach the tablet over Wi-Fi, without the cable |
 | `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet; pictures and live view are real |
-| `serve.bat [port]` | Shows the page in a desktop browser for development; `/remote` there is the remote-control page with a pretend tablet |
+| `serve.bat [port]` | Shows the page in a desktop browser for development; `/remote` there is the remote-control page with a pretend tablet (sign in as `dev`, PIN `1234`) |
 
 `deploy.bat` and the two sync scripts go by USB cable when the tablet is plugged in
 (USB debugging on). To do without the cable, run `wifi-on.bat` once with the

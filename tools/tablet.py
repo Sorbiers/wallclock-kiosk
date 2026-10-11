@@ -17,19 +17,20 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REMEMBERED = ROOT / "tablet.local.txt"   # line 1: the tablet's address, line 2: the remote-control PIN
+REMEMBERED = ROOT / "tablet.local.txt"   # line 1: the tablet's address, line 2: the remote-control PIN, line 3: the user's name
 ADB = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or Path.home() / "AppData/Local/Android/Sdk") / "platform-tools" / "adb.exe"
 ADB_PORT = 5555
 
 
 def remembered() -> list:
-    return REMEMBERED.read_text().split() if REMEMBERED.exists() else []
+    return REMEMBERED.read_text(encoding="utf-8").split() if REMEMBERED.exists() else []
 
 
-def remember(address: str = None, pin: str = None) -> None:
-    """Keep the tablet's address and/or the remote-control PIN for the next run."""
-    known = (remembered() + ["", ""])[:2]
-    REMEMBERED.write_text((address or known[0]) + "\n" + (known[1] if pin is None else pin) + "\n")
+def remember(address: str = None, pin: str = None, user: str = None) -> None:
+    """Keep the tablet's address and/or the remote-control name and PIN for the next run."""
+    known = (remembered() + ["", "", ""])[:3]
+    kept = [address or known[0], known[1] if pin is None else pin, known[2] if user is None else user]
+    REMEMBERED.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
 
 def run(*args, timeout=None) -> subprocess.CompletedProcess:

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0c0f">
+<title>Wall Clock remote</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="remote.css">
+</head>
+<body>
+
+<main class="handset" id="handset">
+  <header class="top">
+    <span class="brand">Wall Clock</span>
+    <span class="led" id="led"></span>
+  </header>
+
+  <section class="lcd">
+    <div class="lcd-time" id="time">--:--</div>
+    <div class="lcd-date" id="date"></div>
+    <div class="lcd-weather" id="weather"></div>
+    <div class="lcd-state" id="state">Calling the wall clock</div>
+    <div class="lcd-alert" id="alert" hidden></div>
+  </section>
+
+  <form class="signin" id="signin" hidden>
+    <p id="signin-note"></p>
+    <input id="signin-user" placeholder="Name" autocomplete="username" autocapitalize="none" spellcheck="false">
+    <input id="signin-pin" placeholder="PIN" type="password" autocomplete="current-password">
+    <button type="submit" class="key key-blue">Sign in</button>
+  </form>
+
+  <div id="controls" hidden>
+    <div class="row" id="alarm-row" hidden>
+      <button type="button" class="key key-red" id="stop">Stop</button>
+      <button type="button" class="key key-yellow" id="snooze">Snooze</button>
+    </div>
+
+    <div class="label">Show on the wall</div>
+    <div class="pad" id="pad">
+      <button type="button" class="key" data-view="clock">Clock</button>
+      <button type="button" class="key" data-view="camera">Camera</button>
+      <button type="button" class="key" data-view="events">Events</button>
+      <button type="button" class="key" data-view="weather">Weather</button>
+      <button type="button" class="key" data-view="news">News</button>
+      <button type="button" class="key" data-view="slides">Slides</button>
+    </div>
+
+    <div class="groove"></div>
+
+    <div class="row">
+      <button type="button" class="key key-blue" id="open-events">Event list</button>
+      <button type="button" class="key" id="open-settings">Settings</button>
+    </div>
+
+    <footer class="who">
+      <span id="who"></span>
+      <button type="button" id="signout">Sign out</button>
+    </footer>
+  </div>
+</main>
+
+<section class="events" id="events" hidden>
+  <header class="events-head">
+    <button type="button" class="key" id="events-back">&#8249; Remote</button>
+    <h1>Camera alarms <span>last 24 hours</span></h1>
+  </header>
+  <p class="events-note" id="events-note"></p>
+  <div id="events-list"></div>
+</section>
+
+<div class="lightbox" id="lightbox" hidden>
+  <img id="lightbox-img" alt="">
+  <div class="lightbox-top"><span id="lightbox-caption"></span><span id="lightbox-count"></span></div>
+  <button type="button" class="lightbox-step" id="lightbox-prev" aria-label="Previous picture">&#8249;</button>
+  <button type="button" class="lightbox-step" id="lightbox-next" aria-label="Next picture">&#8250;</button>
+  <button type="button" class="key" id="lightbox-close">Close</button>
+</div>
+
+<script src="remote.js"></script>
+</body>
+</html>
