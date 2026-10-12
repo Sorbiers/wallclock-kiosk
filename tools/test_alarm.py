@@ -1,7 +1,8 @@
-"""Pretend a camera alarm on the tablet:  python tools/test_alarm.py [camera] [tablet address]
+"""Pretend a camera alarm on the tablet:  python tools/test_alarm.py [camera] [tablet address[:port]]
 
 camera: 1 (default) or 2, as numbered in the app's settings. Only the trigger
-is pretended; the pictures and the live view are real.
+is pretended; the pictures and the live view are real. The port is the remote
+control's: needed once, when the tablet's settings name another than 8080.
 
 The tablet's address and your name and PIN for its remote control are
 remembered in tablet.local.txt (not in git): the address is asked from the
@@ -34,12 +35,13 @@ def tablet_address() -> str:
 
 def main() -> None:
     camera = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 1
-    address = tablet_address()
-    known = tablet.remembered() + ["", "", ""]
+    address, _, port = tablet_address().partition(":")
+    known = tablet.remembered() + ["", "", "", ""]
     pin, user = known[1], known[2] or "home"   # "home": the name the single PIN of earlier versions goes by
+    port = port or known[3] or str(PORT)
     command = json.dumps({"test": True, "cam": camera - 1}).encode()
     for asked in (False, True):
-        request = urllib.request.Request(f"http://{address}:{PORT}/api/command", method="POST", data=command,
+        request = urllib.request.Request(f"http://{address}:{port}/api/command", method="POST", data=command,
                                          headers={"X-User": urllib.parse.quote(user), "X-Pin": pin})
         try:
             urllib.request.urlopen(request, timeout=8).read()
@@ -52,9 +54,10 @@ def main() -> None:
             user = input(f"Remote-control user name [{user}]: ").strip() or user
             pin = input("PIN: ").strip()
         except OSError as failed:
-            sys.exit(f"Could not reach the tablet at {address}: {failed}\n"
-                     f"If its address changed, delete {tablet.REMEMBERED.name} and plug the tablet in.")
-    tablet.remember(address, pin, user)
+            sys.exit(f"Could not reach the tablet at {address}:{port}: {failed}\n"
+                     f"If its address changed, delete {tablet.REMEMBERED.name} and plug the tablet in.\n"
+                     f"If the port was changed in its settings, give it once: test-alarm.bat {camera} {address}:<port>")
+    tablet.remember(address, pin, user, port)
     print(f"Test alarm sent for camera {camera} to the tablet at {address}.")
 
 

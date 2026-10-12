@@ -16,7 +16,9 @@
   // only the mode buttons and the settings, acting on the tablet.
   const REMOTE = document.body.classList.contains("remote");
   const VIEWS = ["clock", "camera", "events", "weather", "news", "slides", "settings"];
-  const DAY_PEEK_MS = 5000;   // a tap at night shows day mode for this long
+  const DAY_PEEK_MS = 5000;   // a tap puts the screen "in use" for this long: day colours, the in-use backlight
+  const RESCUE_MS = 30000;    // a double tap: full light and white on black for this long, whatever is set
+  const DOUBLE_TAP_MS = 400;
   const TEST_CODE = "Test";
   const EVENT_LABELS = {
     CrossLineDetection: "Line crossed",
@@ -31,7 +33,7 @@
     night: {
       by: "time", start: "22:00", end: "07:00",   // by: "time" = these hours, "dark" = when the room is dark
       dark_lux: 5, light_lux: 10,                 // by "dark": night below dark_lux, day again from light_lux
-      color: "#8f5cff", dim: 0.45, brightness: 0.03,
+      color: "#8f5cff", dim: 0.45, brightness: 0.03,   // brightness: a fixed backlight (0 = the lowest), -1 = it follows the room
     },
     news: {   // what the News page shows
       cards: { usdcad: true, btc: true, rate: true, fuel: true, oil: true, indexes: true, air: true },
@@ -39,9 +41,11 @@
       names: false, church: false, past_ru: false, joke: false,   // the Russian picks
     },
     restart_at: "04:00",                          // the app starts afresh every night; "" = never
-    day: {
-      brightness: -1, color: "#ffffff",   // brightness -1 = leave the backlight to Android
-      auto: { on: true, min: 0.1, max: 1, full_lux: 300 },   // or scale it by the room light ourselves
+    day: { brightness: -1, color: "#ffffff" },   // brightness: as for the night
+    backlight: {
+      dark: 0.1, bright: 1, bright_lux: 300,   // "follows the room": from dark, in the dark, up to bright at bright_lux
+      in_use: 1,                               // while the screen is being used
+      on_alarm: 1,                             // during an alarm; -1 = as it was
     },
     views: { camera_timeout_minutes: 10, weather_timeout_minutes: 0, buttons_hide_seconds: 6 },
     alarm: {
@@ -61,8 +65,8 @@
     camera_user: "",
     camera_password: "",
     remote_pin: "",   // from before the remote control had users: it becomes the first one's PIN
-    remote: {         // who may use the remote control: networks, and users by name and PIN (none = it is off)
-      lan: true, also: "",
+    remote: {         // who may use the remote control: networks, and users by name and PIN (none = it is off); and its TCP port
+      lan: true, also: "", port: 8080,
       users: [0, 1, 2, 3, 4].map(() => ({ name: "", pin: "" })),
     },
     cameras: [
@@ -104,6 +108,7 @@
     listSlides: async () => JSON.parse(window.Android.listSlides()),
     listMedia: async () => JSON.parse(window.Android.listMedia()),
     remoteAddress: () => window.Android.remoteAddress(),
+    remotePortBusy: () => window.Android.remotePortBusy(),   // something else on the tablet has the remote control's port
     lux: () => window.Android.lux(),   // room light from the tablet's sensor; below 0 = no sensor
     clearCache: () => window.Android.clearCache(),
     restart: (view) => window.Android.restart(view || ""),   // comes back on that view; the clock if none
@@ -335,36 +340,48 @@
     return start <= end ? t >= start && t < end : t >= start || t < end;
   }
 
-  // Night mode (dim violet, low backlight) gives way to day mode whenever the
-  // screen is being used: settings, the events list, an alarm, or the seconds
-  // after a tap.
-  // The backlight, by priority: the slideshow's own setting, then full light
-  // while in use, then the night level or the room light.
+  // The screen is in one of three states, the same on every page:
+  //  - resting: day or night colours; the backlight is day.brightness or
+  //    night.brightness, a fixed level (0 = the lowest the screen can do) or,
+  //    when none is given, one that follows the room light;
+  //  - in use (the seconds after a tap, the settings, a picture or chart opened
+  //    large): day colours and backlight.in_use;
+  //  - alarm (a camera alarm on screen, the alarm clock ringing):
+  //    backlight.on_alarm, unless none is given: then nothing changes.
+  // The slideshow's own backlight stands in for the resting one. And whatever
+  // is set, a double tap gives full light and white on black for half a
+  // minute: a screen set too dark to read can always be put right.
   function updateMode() {
-    const inUse = view === "settings" || view === "events" || alarm.open || ringing || Date.now() - lastTouch < DAY_PEEK_MS;
-    night = previewMode ? previewMode === "night" : isNight(new Date()) && !inUse;
+    const rescued = Date.now() < rescueUntil;
+    const used = rescued || view === "settings" || !$("shot").hidden || !$("chart").hidden || Date.now() - lastTouch < DAY_PEEK_MS;
+    const alarmed = alarm.open || ringing;
+    night = previewMode ? previewMode === "night" : isNight(new Date()) && !used;
     document.body.classList.toggle("night", night);
-    const slideLight = night ? cfg.slides.brightness_night : cfg.slides.brightness_day;   // the slideshow's own backlight
-    const level = view === "slides" && !ss.interlude && !ss.fading && slideLight >= 0 ? slideLight
-      : night ? cfg.night.brightness : dayLight(inUse);
+    document.body.classList.toggle("rescue", rescued);
+    const light = cfg.backlight, own = night ? cfg.slides.brightness_night : cfg.slides.brightness_day;
+    const resting = view === "slides" && !ss.interlude && !ss.fading && own >= 0 ? own
+      : night ? cfg.night.brightness : cfg.day.brightness;
+    const level = rescued ? 1
+      : alarmed && light.on_alarm >= 0 ? light.on_alarm
+      : used ? (light.in_use >= 0 ? light.in_use : 1)
+      : resting >= 0 ? resting : roomLight();
     if (level === lastBrightness) return;
     lastBrightness = level;
     native.setBrightness(level);
   }
 
-  // Day backlight by the room light: from day.auto.min in the dark up to
-  // day.auto.max at full_lux, on a logarithmic scale (as the eye judges light).
-  // Android's own adaptive brightness is flat over the lower range on some
-  // tablets, which is why the app can do this itself.
+  // The backlight by the room light: from backlight.dark in the dark up to
+  // backlight.bright at bright_lux, on a logarithmic scale (as the eye judges
+  // light). Android's own adaptive brightness is flat over the lower range on
+  // some tablets, which is why the app does this itself. Without a light
+  // sensor the backlight is left to Android (below 0).
   let calmLux = -1;
-  function dayLight(inUse) {
-    const auto = cfg.day.auto;
-    const lux = auto.on && native.lux ? native.lux() : -1;
-    if (lux < 0) return cfg.day.brightness;   // switched off, or no sensor
-    const low = Math.max(0, auto.min), high = Math.max(low, auto.max);
-    if (inUse) return high;   // someone is at the screen: full light, however dark the room
+  function roomLight() {
+    const lux = native.lux ? native.lux() : -1;
+    if (lux < 0) return -1;
+    const range = cfg.backlight, low = Math.max(0, range.dark), high = Math.max(low, range.bright);
     calmLux = calmLux < 0 ? lux : calmLux + (lux - calmLux) * 0.25;   // smooth out the sensor's jitter
-    const share = Math.min(1, Math.log(1 + calmLux) / Math.log(1 + Math.max(1, auto.full_lux)));
+    const share = Math.min(1, Math.log(1 + calmLux) / Math.log(1 + Math.max(1, range.bright_lux)));
     return Math.round((low + (high - low) * share) * 100) / 100;   // whole percents: no constant fiddling
   }
 
@@ -412,8 +429,15 @@
 
   document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click",
     () => (REMOTE ? command({ view: b.dataset.view }) : show(b.dataset.view))));
-  ["pointerdown", "keydown"].forEach((type) => document.addEventListener(type, () => {
+  let rescueUntil = 0;
+  let lastTap = { at: 0, x: 0, y: 0 };
+  ["pointerdown", "keydown"].forEach((type) => document.addEventListener(type, (touch) => {
     lastTouch = Date.now();
+    if (type === "pointerdown") {   // twice in the same place, quickly: the rescue (see updateMode)
+      const again = lastTouch - lastTap.at < DOUBLE_TAP_MS && Math.hypot(touch.clientX - lastTap.x, touch.clientY - lastTap.y) < 80;
+      if (again) rescueUntil = lastTouch + RESCUE_MS;
+      lastTap = { at: lastTouch, x: touch.clientX, y: touch.clientY };
+    }
     showNav();
     updateMode();
   }));
@@ -1390,7 +1414,6 @@
     $("alarm").hidden = true;
     $("alarm-img").removeAttribute("src");
     syncAlarmLive(-1);
-    lastTouch = Date.now();
     updateMode();
     if (view === "events") renderEvents();   // with what this alarm added
   }
@@ -1711,7 +1734,6 @@
     if (native.setVolume) native.setVolume(-1);   // the tablet's volume as it was
     snoozeUntil = snoozeMinutes ? Date.now() + snoozeMinutes * 60000 : 0;
     $("wake").hidden = true;
-    lastTouch = Date.now();
     updateMode();
   }
 
@@ -1723,6 +1745,8 @@
   const DAYS = [["all", "Every day"], ["weekdays", "Mon\u2013Fri"], ["weekend", "Sat\u2013Sun"], ["once", "Today, once"]];
   const SOUND_NAMES = Object.keys(SOUNDS).map((key) => [key, SOUNDS[key].name]);
   const HINTS = {
+    General: "A tap puts the screen in use for a few seconds: day colours and the backlight set for that. "
+      + "A double tap anywhere gives full light and white on black for half a minute, whatever is set here.",
     Slideshow: "Pictures come from the slides folder on the PC: run sync-slides.bat, then tap Slides to load them.",
     Remote: "The remote control is a page the tablet serves to a PC or phone on the networks allowed here. "
       + "Whoever is listed signs in there with name and PIN; with nobody listed it is off. Away from home, come in "
@@ -1739,9 +1763,12 @@
   // list of choices, "media" (a file from the media folder) or "group" (a
   // heading that folds the fields of its group away and sums them up); extra:
   // { button: [label, action] } puts a button beside the field, { group: n }
-  // puts the field in a group, { describe } gives a heading its summary.
+  // puts the field in a group, { describe } gives a heading its summary,
+  // { wide: true } gives the field a row of its own.
   const percent = { show: (v) => (v < 0 ? "" : Math.round(v * 100)), read: (s) => (s === "" ? -1 : Math.min(100, Math.max(0, +s)) / 100) };
   const number = { show: (v) => v, read: (s) => Math.max(0, +s || 0) };
+  // A TCP port an app may open; anything else is the usual one.
+  const port = { show: (v) => v, read: (s) => (s >= 1024 && s <= 65535 ? Math.round(+s) : DEFAULTS.remote.port) };
   const SETTINGS = [
     ["General", [
       ["locale", "Date language", [["en-CA", "English"], ["fr-CA", "Fran\u00E7ais"], ["ru-RU", "\u0420\u0443\u0441\u0441\u043A\u0438\u0439"]]],
@@ -1751,13 +1778,14 @@
       ["night.light_lux", "\u2026day again when it is lighter than, lux", "number", number],
       ["night.start", "Night mode from", "time"],
       ["night.end", "Night mode until", "time"],
-      ["night.brightness", "Night backlight, % (0 = the lowest the screen can do)", "number", percent],
+      ["night.brightness", "Night backlight, % (0 = the lowest; empty = follows the room)", "number", percent],
       ["night.dim", "Night text strength, %", "number", percent],
-      ["day.brightness", "Day backlight when not following the room, % (empty = Android decides)", "number", percent],
-      ["day.auto.on", "Day backlight follows the room light", "checkbox"],
-      ["day.auto.min", "…in the dark, %", "number", percent],
-      ["day.auto.max", "…at its brightest and after a tap, %", "number", percent],
-      ["day.auto.full_lux", "…brightest from, lux", "number", number],
+      ["day.brightness", "Day backlight, % (empty = follows the room)", "number", percent],
+      ["backlight.dark", "Following the room: in the dark, %", "number", percent],
+      ["backlight.bright", "…at its brightest, %", "number", percent],
+      ["backlight.bright_lux", "…brightest from, lux", "number", number],
+      ["backlight.in_use", "Backlight while the screen is used, %", "number", percent],
+      ["backlight.on_alarm", "Backlight on an alarm, % (empty = as it was)", "number", percent],
       ["night.color", "Night colour", "color"],
       ["day.color", "Day colour", "color"],
       ["views.camera_timeout_minutes", "Camera view back to clock after, min (0 = never)", "number", number],
@@ -1800,7 +1828,8 @@
     ]],
     ["Remote", [
       ["remote.lan", "Allow from the home network (the tablet's own /24)", "checkbox"],
-      ["remote.also", "Also allow from (a VPN's network, e.g. 10.8.0.0/24)", "text"],
+      ["remote.port", "TCP port (1024 to 65535; empty = 8080)", "number", port],
+      ["remote.also", "Also allow from (a VPN's network, e.g. 10.8.0.0/24)", "text", null, { wide: true }],
     ].concat([0, 1, 2, 3, 4].reduce((rows, i) => rows.concat([
       ["remote.users." + i + ".name", "User " + (i + 1), "text"],
       ["remote.users." + i + ".pin", "PIN", "password"],
@@ -1878,6 +1907,7 @@
         }
         const row = el("label", kind === "checkbox" ? "field check" : "field");
         if (extra.group != null) row.dataset.group = extra.group;
+        if (extra.wide) row.classList.add("wide");
         const value = pathGet(cfg, path);
         let input;
         if (Array.isArray(kind) || kind === "media") {
@@ -1942,8 +1972,9 @@
     $("settings-test").hidden = TABS[settingsTab][0] !== "Cameras";
     const address = native.remoteAddress ? native.remoteAddress() : "";
     $("settings-remote").textContent = !address ? ""
-      : cfg.remote.users.some((user) => user.name && user.pin) ? "Remote control from a PC or phone on this Wi-Fi: " + address
-      : "Remote control is off. List a user on the Remote tab to use it from a PC or phone.";
+      : !cfg.remote.users.some((user) => user.name && user.pin) ? "Remote control is off. List a user on the Remote tab to use it from a PC or phone."
+      : native.remotePortBusy() ? "Remote control: port " + cfg.remote.port + " is taken on this tablet. Choose another on the Remote tab."
+      : "Remote control from a PC or phone on this Wi-Fi: " + address;
     if (BUILD) $("settings-build").textContent = "App built " + BUILD;
   }
 
@@ -2117,6 +2148,14 @@
         cfg = merge(BASE, saved);
         // Saved before "day again" was a setting of its own: it was twice the dark limit.
         if (!saved.night || saved.night.light_lux == null) cfg.night.light_lux = cfg.night.dark_lux * 2;
+        // Saved when following the room was a switch for the day only: its range now serves day and night.
+        const was = saved.day && saved.day.auto;
+        if (was && !saved.backlight) {
+          if (was.min >= 0) cfg.backlight.dark = was.min;
+          if (was.max >= 0) cfg.backlight.bright = cfg.backlight.in_use = was.max;
+          if (was.full_lux > 0) cfg.backlight.bright_lux = was.full_lux;
+          if (was.on) cfg.day.brightness = -1;
+        }
       }
     } catch (e) { /* first run, or unreadable settings: defaults */ }
     if (typeof cfg.alarm.sound === "boolean") cfg.alarm.sound = cfg.alarm.sound ? "beep" : "none";   // it was a switch once

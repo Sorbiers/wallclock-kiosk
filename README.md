@@ -41,9 +41,11 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   each rings a sound of its own choice or plays a YouTube link, music or a video
   from the tablet, or shows a picture. Snooze and Stop.
 - **Night mode** — its own colour and backlight, by the clock or when the room
-  is dark (light sensor).
-- **Remote control** — a page served by the tablet itself (`http://<tablet>:8080`),
-  made like a TV remote: what the wall clock is doing, keys to switch its page
+  is dark (light sensor). By day and by night the backlight is a fixed level or
+  follows the room light; a tap brightens the screen for a few seconds, an
+  alarm can too, and a double tap always gives full light for half a minute.
+- **Remote control** — a page served by the tablet itself (`http://<tablet>:8080`;
+  the settings can name another port), made like a TV remote: what the wall clock is doing, keys to switch its page
   and to stop an alarm, the list of camera alarms with their pictures, and a
   Settings key to every setting (which can also save the settings to a file
   and restore them; the camera password and the PINs never leave the tablet).

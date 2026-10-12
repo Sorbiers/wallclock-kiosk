@@ -160,6 +160,12 @@ public final class RemoteTest {
         for (int i = 0; i < 5; i++) get(port, "/api/state", "anna", "000000");
         check("five wrong PINs lock even the right one out (429)", get(port, "/api/state", "anna", "246810").status == 429);
 
+        Remote second = new Remote(port, host);   // while the first still has the port
+        second.setDaemon(true);
+        second.start();
+        second.join(2000);
+        check("a port already taken is reported", second.busy() && !remote.busy() && second.port() == port);
+
         host.access.lan = false;   // this test comes from 127.0.0.1, the "home network" of 127.0.0.1
         check("home network switched off: not even the page", get(port, "/", null, null).status == 403);
         host.access.lan = true;

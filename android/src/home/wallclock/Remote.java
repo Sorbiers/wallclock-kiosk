@@ -18,10 +18,10 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Remote control: a tiny web server on the tablet. http://tablet:8080 from a PC
- * or phone shows a page made like a TV remote (remote.html): what the wall
- * clock is doing, buttons to switch its page, the camera alarms with the
- * pictures the cameras took.
+ * Remote control: a tiny web server on the tablet. http://tablet:8080 (or the
+ * port the settings name) from a PC or phone shows a page made like a TV
+ * remote (remote.html): what the wall clock is doing, buttons to switch its
+ * page, the camera alarms with the pictures the cameras took.
  * "/settings" is the kiosk page itself in "remote" form, with every setting.
  *
  * Who gets in: only addresses on the networks the settings allow (the tablet's
@@ -69,7 +69,7 @@ final class Remote extends Thread {
         void log(String message);
     }
 
-    static final int PORT = 8080;
+    static final int DEFAULT_PORT = 8080;   // the settings may name another
     /** How the tablet names its copies of the cameras' alarm pictures (see Cameras). Nothing else is handed out. */
     static final String SHOT_FILE = "\\d+_\\d+_[\\w+]*_[0-9A-F]+\\.jpg";
     private static final int MAX_BODY = 200000;
@@ -81,6 +81,7 @@ final class Remote extends Thread {
     private final Host host;
     private final AtomicInteger visitors = new AtomicInteger();
     private volatile ServerSocket server;
+    private volatile boolean busy;
     private int wrongPins;
     private long lockedUntil;
 
@@ -88,6 +89,15 @@ final class Remote extends Thread {
         super("remote");
         this.port = port;
         this.host = host;
+    }
+
+    int port() {
+        return port;
+    }
+
+    /** True when the port could not be opened: something else on the tablet has it. */
+    boolean busy() {
+        return busy;
     }
 
     void close() {
@@ -102,8 +112,9 @@ final class Remote extends Thread {
     public void run() {
         try {
             server = new ServerSocket(port);
-        } catch (IOException busy) {
-            host.log("Remote control not available: " + busy);
+        } catch (IOException taken) {
+            busy = true;
+            host.log("Remote control not available on port " + port + ": " + taken);
             return;
         }
         while (!server.isClosed()) {

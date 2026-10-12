@@ -17,6 +17,8 @@ body.night {
   --dim: var(--night-dim);
   --soft: 0.9;         /* already dimmed: keep labels readable */
 }
+/* after a double tap: readable whatever colours and strengths are set */
+body.rescue { --fg: #fff; --dim: 1; --soft: 0.6; }
 
 * { box-sizing: border-box; margin: 0; }
 
@@ -299,7 +301,8 @@ body.night .seg.on.rest { opacity: 0.3; }
 
 /* --- newspaper: money and fuel in small charts, the day in history, headlines ---
    Read up close, so it is set like a paper: a masthead, rules, serif for the prose. */
-#view-news { padding: 4vh 4vw 0; overflow-y: auto; scrollbar-width: none; }
+#view-news { padding: 4vh 4vw 0; overflow-y: auto; scrollbar-width: none; opacity: 1; }   /* its picture is never dimmed at night; all else is */
+#view-news .head, .paper-money, .paper-block:not(.paper-picture), #view-news .paper-picture > :not(img) { opacity: var(--dim); }
 .paper-line { display: flex; align-items: baseline; gap: 2vw; }
 .paper-name { font-family: "Noto Serif", Georgia, serif; font-style: italic; font-size: 4.4vh; white-space: nowrap; }
 .paper {
@@ -383,7 +386,8 @@ body.night .up, body.night .down { color: inherit; }   /* no bright colours at n
 .chart-dates { display: flex; justify-content: space-between; padding-left: 8vw; font-size: 2.4vh; opacity: var(--soft); }
 
 /* --- camera alarms of the last 24 hours: a list, and one picture full screen -- */
-#view-events { padding: 4vh 4vw 0; opacity: 1; }
+#view-events { padding: 4vh 4vw 0; opacity: 1; }   /* pictures are never dimmed at night; the words around them are */
+#view-events .head, .ev-meta { opacity: var(--dim); }
 .ev-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16vh; scrollbar-width: none; }   /* room for the buttons */
 .ev {
   display: grid;
@@ -548,6 +552,7 @@ body.remote .settings-actions { flex-wrap: wrap; }
 .field-group::after { content: "\25B8"; margin-left: auto; opacity: 0.6; }
 .field-group.open::after { content: "\25BE"; }
 .field[hidden] { display: none; }
+.field.wide { grid-column: 1 / -1; }   /* a row of its own */
 .remote-state { display: none; }   /* what the tablet is doing: on the remote page only */
 .settings fieldset.three .field.check { align-self: end; padding-bottom: 1vh; }   /* level with the inputs beside it */
 .field.check { flex-direction: row; justify-content: flex-start; align-items: center; gap: 1.4vw; font-size: 2.8vh; }

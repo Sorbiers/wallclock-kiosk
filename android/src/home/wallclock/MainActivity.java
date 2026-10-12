@@ -53,7 +53,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private Cameras cameras;
-    private Remote remote;
+    private volatile Remote remote;
     private volatile float lux = -1f;   // room light from the sensor; below 0 = not known
     private volatile String pageState = "{}";   // what the page says it is doing, for the remote page
     private long startedAt;
@@ -104,8 +104,7 @@ public class MainActivity extends Activity {
         setContentView(web);
         web.loadUrl(view == null ? PAGE : PAGE + "?view=" + view);
 
-        remote = new Remote(Remote.PORT, new RemoteHost());
-        remote.start();
+        listen();
     }
 
     @Override
@@ -169,6 +168,27 @@ public class MainActivity extends Activity {
 
     private SharedPreferences settings() {
         return getSharedPreferences("kiosk", MODE_PRIVATE);
+    }
+
+    /** The remote control's port: the one the settings name, when it is one an app may open. */
+    private int remotePort() {
+        try {
+            JSONObject saved = new JSONObject(settings().getString("config", "{}")).optJSONObject("remote");
+            int port = saved == null ? 0 : saved.optInt("port");
+            if (port >= 1024 && port <= 65535) return port;
+        } catch (JSONException unreadable) {
+            // the usual port
+        }
+        return Remote.DEFAULT_PORT;
+    }
+
+    /** Start the remote control, or move it when the settings name another port. */
+    private synchronized void listen() {
+        int port = remotePort();
+        if (remote != null && remote.port() == port) return;
+        if (remote != null) remote.close();
+        remote = new Remote(port, new RemoteHost());
+        remote.start();
     }
 
     /**
@@ -324,6 +344,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void saveConfig(String json) {
             settings().edit().putString("config", json).apply();
+            listen();   // the remote control's port may have changed
         }
 
         /** The page's effective settings: (re)start listening to the cameras with them. */
@@ -369,7 +390,7 @@ public class MainActivity extends Activity {
                 for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                     for (InetAddress address : Collections.list(network.getInetAddresses())) {
                         if (address instanceof Inet4Address && address.isSiteLocalAddress()) {
-                            return "http://" + address.getHostAddress() + ":" + Remote.PORT;
+                            return "http://" + address.getHostAddress() + ":" + remote.port();
                         }
                     }
                 }
@@ -377,6 +398,12 @@ public class MainActivity extends Activity {
                 // no network
             }
             return "";
+        }
+
+        /** True when the remote control could not open its port: something else on the tablet has it. */
+        @JavascriptInterface
+        public boolean remotePortBusy() {
+            return remote.busy();
         }
 
         @JavascriptInterface
