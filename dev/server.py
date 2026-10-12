@@ -236,8 +236,17 @@ async def snapshot(request: web.Request) -> web.Response:
 
 
 async def slides(request: web.Request) -> web.Response:
+    """The pictures in the slides folder itself, or in a folder inside it (?folder=name)."""
     pictures = (".jpg", ".jpeg", ".png", ".webp")
-    return web.json_response(sorted(p.name for p in SLIDES_DIR.iterdir() if p.suffix.lower() in pictures))
+    folder = request.query.get("folder", "")
+    where = SLIDES_DIR / folder if folder else SLIDES_DIR
+    if "/" in folder or "\\" in folder or folder.startswith(".") or not where.is_dir():
+        return web.json_response([])
+    return web.json_response(sorted(p.name for p in where.iterdir() if p.suffix.lower() in pictures))
+
+
+async def slide_folders(request: web.Request) -> web.Response:
+    return web.json_response(sorted(p.name for p in SLIDES_DIR.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))))   # as sync-slides.bat copies them
 
 
 async def media(request: web.Request) -> web.Response:
@@ -356,6 +365,7 @@ def main() -> None:
     app.router.add_post("/api/config", remote_save)
     app.router.add_get("/api/state", remote_state)
     app.router.add_get("/api/media", media)
+    app.router.add_get("/api/folders", slide_folders)
     app.router.add_post("/api/command", remote_command)
     app.router.add_get("/dev/events", events)
     app.router.add_post("/dev/test-alarm/{cam}", test_alarm)
@@ -365,6 +375,7 @@ def main() -> None:
     app.router.add_get("/cam/{cam}/since", card_since)
     SLIDES_DIR.mkdir(exist_ok=True)
     app.router.add_get("/dev/slides", slides)
+    app.router.add_get("/dev/slide-folders", slide_folders)
     app.router.add_static("/slides/", SLIDES_DIR)
     MEDIA_DIR.mkdir(exist_ok=True)
     app.router.add_get("/dev/media", media)

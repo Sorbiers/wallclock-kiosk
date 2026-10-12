@@ -32,7 +32,8 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   Quebec's Régie de l'énergie, Open-Meteo, Nager.Date, Wikipedia and Wikimedia
   Commons, Google News, azbyka.ru and anekdot.ru.
 - **Slides** — a slideshow of your own pictures, optionally on a daily schedule
-  and with the clock page in between.
+  and with the clock page in between. Day and night can each have a folder of
+  pictures of their own.
 - **Camera alarms** — when a camera's tripwire or intrusion rule fires, pictures
   from that camera appear over whatever is showing, with a sound of your choice
   (or none), for as long and as loud as you set. Upright, the camera also plays
@@ -86,7 +87,7 @@ script calls the SDK tools directly.
 |---|---|
 | `build.bat [--debug]` | Builds `dist\wallclock.apk`; `--debug` makes the page inspectable over USB (chrome://inspect) |
 | `deploy.bat` | Installs it on the tablet and starts it; settings on the tablet are kept |
-| `sync-slides.bat [folder]` | Copies the slideshow pictures (default: `slides\`) to the tablet, shrunk to tablet size |
+| `sync-slides.bat [folder]` | Copies the slideshow pictures (default: `slides\`, with the folders inside it) to the tablet, shrunk to tablet size |
 | `sync-media.bat [folder]` | Copies what the alarm clock can play (default: `media\`): music, videos, pictures |
 | `wifi-on.bat` | Lets the scripts above reach the tablet over Wi-Fi, without the cable |
 | `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet; pictures and live view are real |

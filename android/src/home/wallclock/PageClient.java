@@ -19,13 +19,14 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Answers the page's own requests from inside the app: its files come from the
  * bundled assets, "/cam/..." is fetched from a camera with the login (a fresh
  * snapshot, or the alarms and pictures on its card), and
- * "/slides/..." comes from the slideshow folder and "/media/..." from the
+ * "/slides/..." comes from the slideshow folder (or a folder inside it) and "/media/..." from the
  * folder of what the alarm clock plays. "/feed/..." is fetched from the two
  * services the newspaper page uses that a web page is not let to read.
  * Anything else (the weather service) goes to the network as usual.
@@ -61,7 +62,7 @@ final class PageClient extends WebViewClient {
         if (!HOST.equals(url.getHost())) return null;
         String path = url.getPath() == null ? "/" : url.getPath();
         if (path.startsWith("/cam/")) return cameras.answer(url);
-        if (path.startsWith("/slides/")) return slide(new File(path).getName());   // the name only: no ".."
+        if (path.startsWith("/slides/")) return slide(url.getPathSegments());
         if (path.startsWith("/media/")) return media(new File(path).getName(), header(request, "Range"));
         if (path.startsWith("/feed/")) return feed(url);
         String file = path.equals("/") ? "index.html" : path.substring(1);
@@ -78,13 +79,27 @@ final class PageClient extends WebViewClient {
         return request.isForMainFrame() && !HOST.equals(request.getUrl().getHost());
     }
 
-    private WebResourceResponse slide(String name) {
+    /** "/slides/name" is a picture in the slides folder, "/slides/folder/name" one in a folder inside it; nothing else. */
+    private WebResourceResponse slide(List<String> parts) {   // the first part is "slides"
         try {
-            if (slides == null || !isPicture(name)) return failure(404, "Not Found");
-            return new WebResourceResponse(mimeType(name.toLowerCase()), null, new FileInputStream(new File(slides, name)));
+            String name = parts.get(parts.size() - 1);
+            File folder = parts.size() == 2 ? slides : parts.size() == 3 ? inside(slides, parts.get(1)) : null;
+            if (folder == null || !plain(name) || !isPicture(name)) return failure(404, "Not Found");
+            return new WebResourceResponse(mimeType(name.toLowerCase()), null, new FileInputStream(new File(folder, name)));
         } catch (IOException missing) {
             return failure(404, "Not Found");
         }
+    }
+
+    /** The slides folder itself for "", a folder inside it by its plain name, null for anything else. */
+    static File inside(File slides, String folder) {
+        if (slides == null || folder == null || folder.isEmpty()) return slides;
+        return plain(folder) ? new File(slides, folder) : null;
+    }
+
+    /** A file's or folder's own name and nothing more: no path in it, nothing hidden. */
+    static boolean plain(String name) {
+        return !name.isEmpty() && !name.startsWith(".") && name.indexOf('/') < 0 && name.indexOf('\\') < 0;
     }
 
     /**

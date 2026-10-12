@@ -55,6 +55,7 @@
     },
     slides: {
       seconds: 8, transition: "random", motion: true, clock: true,
+      folder_day: "", folder_night: "",           // a folder inside the slides folder; "" = the slides folder itself
       brightness_day: -1, brightness_night: -1,   // -1 = the usual day / night backlight
       clock_every: 0, clock_seconds: 20,          // the clock page after every N pictures; 0 = never
       auto_start: "", auto_stop: "",              // "HH:MM": run by itself between these; empty = off
@@ -105,7 +106,8 @@
     configure: (json) => window.Android.configure(json),
     setBrightness: (level) => window.Android.setBrightness(level),
     openSystemSettings: () => window.Android.openSystemSettings(),
-    listSlides: async () => JSON.parse(window.Android.listSlides()),
+    listSlides: async (folder) => JSON.parse(window.Android.listSlides(folder)),   // "" = the slides folder itself
+    listSlideFolders: async () => JSON.parse(window.Android.listSlideFolders()),  // the folders inside it
     listMedia: async () => JSON.parse(window.Android.listMedia()),
     remoteAddress: () => window.Android.remoteAddress(),
     remotePortBusy: () => window.Android.remotePortBusy(),   // something else on the tablet has the remote control's port
@@ -120,6 +122,7 @@
     configure: () => {},
     setBrightness: () => {},
     listSlides: async () => [],
+    listSlideFolders: () => api("/api/folders").then(JSON.parse),
     listMedia: () => api("/api/media").then(JSON.parse),
   } : {   // desktop browser: the dev server plays the native part
     getConfig: () => fetch("/dev/config").then((r) => r.text()),
@@ -130,7 +133,8 @@
       source.addEventListener("status", (e) => onCameraStatus(JSON.parse(e.data)));
     },
     setBrightness: () => {},
-    listSlides: () => fetch("/dev/slides").then((r) => r.json()),
+    listSlides: (folder) => fetch("/dev/slides?folder=" + encodeURIComponent(folder)).then((r) => r.json()),
+    listSlideFolders: () => fetch("/dev/slide-folders").then((r) => r.json()),
     listMedia: () => fetch("/dev/media").then((r) => r.json()),
   };
   const BUILD = window.Android ? window.Android.build() : "";   // when the app was built, and from which commit
@@ -510,7 +514,8 @@
   }
 
   // --- slideshow --------------------------------------------------------------
-  // Pictures from the tablet's slides folder (filled by sync-slides.bat), played
+  // Pictures from the tablet's slides folder (filled by sync-slides.bat), or
+  // from a folder inside it, which may be one by day and another at night; played
   // from a shuffled deck: every picture once before any repeats. Two stacked
   // layers take turns so the leaving and arriving pictures animate against each
   // other; each picture drifts slowly while it holds, and a blurred copy of it
@@ -528,7 +533,17 @@
   };
   const SS_TRANS_MS = 1100;
   const BACKLIGHT_RAMP_MS = 5000;   // Android changes the backlight this slowly
-  const ss = { items: [], deck: [], layers: [], front: 0, last: null, timer: null, run: 0, count: 0, interlude: false, fading: false, fadeTimer: null };
+  const ss = { items: [], deck: [], layers: [], front: 0, last: null, timer: null, run: 0, count: 0, interlude: false, fading: false, fadeTimer: null, folder: "" };
+
+  // The folder for this time of day. It goes by day and night as such: the
+  // few seconds of day colours after a tap do not change the pictures.
+  const slidesFolder = () => (isNight(new Date()) ? cfg.slides.folder_night : cfg.slides.folder_day);
+
+  // Day has turned to night, or night to day, while the slideshow runs: it
+  // starts over with the other folder (unless both use the same one).
+  function checkSlideFolder() {
+    if (view === "slides" && !ss.interlude && slidesFolder() !== ss.folder) startSlides();
+  }
 
   ss.layers = [0, 1].map(() => {
     const layer = { el: el("div", "ss-slide"), back: el("div", "ss-backdrop"), img: el("img", "ss-img"), drift: null };
@@ -569,16 +584,21 @@
     ss.fading = false;
     $("ss-digits").hidden = !cfg.slides.clock;
     $("ss-empty").hidden = true;
+    const folder = ss.folder = slidesFolder();
     // Every time Slides is opened the folder is read again: its content may
     // have changed (sync-slides.bat). The pictures kept in memory are dropped,
     // and a new address makes sure each one really comes from the folder.
     if (native.clearCache) native.clearCache();
     const fresh = "?v=" + Date.now();
     let names = [];
-    try { names = await native.listSlides(); } catch (e) { /* treated as an empty folder */ }
+    try { names = await native.listSlides(folder); } catch (e) { /* treated as an empty folder */ }
     if (run !== ss.run) return;
-    ss.items = names.map((name) => "/slides/" + encodeURIComponent(name) + fresh);
+    const from = "/slides/" + (folder ? encodeURIComponent(folder) + "/" : "");
+    ss.items = names.map((name) => from + encodeURIComponent(name) + fresh);
     ss.deck = [];
+    $("ss-empty").textContent = folder
+      ? 'No pictures in the folder "' + folder + '". Put them in slides\\' + folder + " on the PC and run sync-slides.bat, or choose another folder in the settings."
+      : "No pictures yet. Put them in the slides folder on the PC and run sync-slides.bat.";
     $("ss-empty").hidden = ss.items.length > 0;
     if (ss.items.length) nextSlide(true);
   }
@@ -1747,7 +1767,8 @@
   const HINTS = {
     General: "A tap puts the screen in use for a few seconds: day colours and the backlight set for that. "
       + "A double tap anywhere gives full light and white on black for half a minute, whatever is set here.",
-    Slideshow: "Pictures come from the slides folder on the PC: run sync-slides.bat, then tap Slides to load them.",
+    Slideshow: "Pictures come from the slides folder on the PC: run sync-slides.bat, then tap Slides to load them. "
+      + "Folders inside it go along and can be chosen here, one for the day and one for the night.",
     Remote: "The remote control is a page the tablet serves to a PC or phone on the networks allowed here. "
       + "Whoever is listed signs in there with name and PIN; with nobody listed it is off. Away from home, come in "
       + "through a VPN, and name its network here if its addresses are not the home ones. "
@@ -1760,7 +1781,8 @@
       + "An alarm's volume is a share of the loudest the tablet can do, whatever its volume is set to.",
   };
   // Tabs of [setting, label, kind, conversion, extra]; kind is an input type, a
-  // list of choices, "media" (a file from the media folder) or "group" (a
+  // list of choices, "media" (a file from the media folder), "folder" (a
+  // folder inside the slides folder) or "group" (a
   // heading that folds the fields of its group away and sums them up); extra:
   // { button: [label, action] } puts a button beside the field, { group: n }
   // puts the field in a group, { describe } gives a heading its summary,
@@ -1815,6 +1837,8 @@
       ["alarm.volume", "\u2026volume, % of the loudest (empty = as the tablet is set)", "number", percent],
     ]],
     ["Slideshow", [
+      ["slides.folder_day", "Pictures by day, from", "folder"],
+      ["slides.folder_night", "Pictures at night, from", "folder"],
       ["slides.seconds", "Each picture, s", "number", number],
       ["slides.transition", "Transition", [["random", "Random"], ["fade", "Crossfade"], ["slide", "Slide"], ["zoom", "Zoom"]]],
       ["slides.motion", "Slow pan and zoom", "checkbox"],
@@ -1887,6 +1911,7 @@
     form.textContent = "";
     tabs.textContent = "";
     const media = native.listMedia().catch(() => []);   // asked once for all the alarms
+    const folders = native.listSlideFolders().catch(() => []);
     TABS.forEach((tab, index) => {
       const button = el("button", "", tab[0]);
       button.type = "button";
@@ -1910,13 +1935,15 @@
         if (extra.wide) row.classList.add("wide");
         const value = pathGet(cfg, path);
         let input;
-        if (Array.isArray(kind) || kind === "media") {
+        if (Array.isArray(kind) || kind === "media" || kind === "folder") {
           input = el("select");
-          // A file is listed from the start if it is the chosen one, even when the folder no longer has it.
-          const choices = kind === "media" ? [["", "None"]].concat(value ? [[value, value]] : []) : kind;
+          // What the tablet has is asked for; the chosen one is listed from the start, even when the tablet no longer has it.
+          const asked = kind === "media" ? media : kind === "folder" ? folders : null;
+          const none = kind === "media" ? "None" : "The slides folder itself";
+          const choices = asked ? [["", none]].concat(value ? [[value, value]] : []) : kind;
           choices.forEach((option) => { input.appendChild(el("option", "", option[1])).value = option[0]; });
-          if (kind === "media") {
-            media.then((names) => names.forEach((name) => { if (name !== value) input.appendChild(el("option", "", name)).value = name; }));
+          if (asked) {
+            asked.then((names) => names.forEach((name) => { if (name !== value) input.appendChild(el("option", "", name)).value = name; }));
           }
         } else {
           input = el("input");
@@ -2193,6 +2220,7 @@
     alarmTick();
     checkClockAlarms();
     checkSlideSchedule();
+    checkSlideFolder();
     showRoomLight();
     checkIdle();
     renderStatus();

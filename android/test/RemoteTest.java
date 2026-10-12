@@ -53,6 +53,10 @@ public final class RemoteTest {
             return "[]";
         }
 
+        public String slideFolders() {
+            return "[\"night\"]";
+        }
+
         public String state() {
             return "{\"view\":\"clock\"}";
         }
@@ -142,6 +146,8 @@ public final class RemoteTest {
                 && host.saved.isEmpty() && post(port, "/api/config", "anna", "246810", "{\"x\":1}").status == 200
                 && host.saved.equals("{\"x\":1}"));
         check("the alarm list is handed on", get(port, "/api/events", "anna", "246810").text().contains("Driveway"));
+        check("the slide folders are handed on, with the PIN only", get(port, "/api/folders", "anna", "246810").text().equals("[\"night\"]")
+                && get(port, "/api/folders", null, null).status == 401);
         String file = "1791654912000_0_CrossLineDetection%2BCrossRegionDetection_0A1B2C3D4E5F.jpg";
         Reply picture = get(port, "/api/shot?size=thumb&file=" + file, "anna", "246810");
         check("a picture comes as a JPEG", picture.status == 200 && picture.type.startsWith("image/jpeg")

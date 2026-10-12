@@ -57,6 +57,9 @@ final class Remote extends Thread {
         /** The names of the files the alarm clock can play, as a JSON list. */
         String media();
 
+        /** The names of the folders inside the slides folder, as a JSON list. */
+        String slideFolders();
+
         /** What the tablet is doing right now, as JSON. */
         String state();
 
@@ -191,6 +194,8 @@ final class Remote extends Thread {
             json(out, "{\"user\":\"" + user.replace("\\", "").replace("\"", "") + "\",\"tablet\":" + host.state() + "}");
         } else if (path.equals("/api/media")) {
             json(out, host.media());
+        } else if (path.equals("/api/folders")) {
+            json(out, host.slideFolders());
         } else if (path.equals("/api/events")) {
             json(out, host.alarms());
         } else if (path.equals("/api/shot")) {   // ?size=thumb or full&file=...: one picture of an alarm

@@ -218,6 +218,19 @@ public class MainActivity extends Activity {
         return names.toString();
     }
 
+    /** The names of the folders inside the slides folder, as a JSON list: day and night may each have one. */
+    private static String folders(File slides) {
+        JSONArray names = new JSONArray();
+        File[] found = slides == null ? null : slides.listFiles();
+        if (found != null) {
+            Arrays.sort(found);
+            for (File one : found) {
+                if (one.isDirectory() && PageClient.plain(one.getName())) names.put(one.getName());
+            }
+        }
+        return names.toString();
+    }
+
     /** What the remote-control page (another device's browser) may do. */
     private final class RemoteHost implements Remote.Host {
         private JSONObject saved() throws JSONException {
@@ -320,6 +333,11 @@ public class MainActivity extends Activity {
         }
 
         @Override
+        public String slideFolders() {
+            return folders(slides());
+        }
+
+        @Override
         public String state() {
             return pageState;
         }
@@ -371,10 +389,16 @@ public class MainActivity extends Activity {
             return lux;
         }
 
-        /** File names of the slideshow pictures, as a JSON list. */
+        /** File names of the slideshow pictures, in the slides folder itself ("") or a folder inside it, as a JSON list. */
         @JavascriptInterface
-        public String listSlides() {
-            return names(slides(), true);
+        public String listSlides(String folder) {
+            return names(PageClient.inside(slides(), folder), true);
+        }
+
+        /** The folders inside the slides folder, as a JSON list of names. */
+        @JavascriptInterface
+        public String listSlideFolders() {
+            return folders(slides());
         }
 
         /** File names of what the alarm clock can play or show, as a JSON list. */
