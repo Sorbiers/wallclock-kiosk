@@ -26,6 +26,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -43,6 +44,10 @@ import java.util.regex.Pattern;
  * Those pictures are copied to the tablet and kept for a day: every couple of
  * minutes, and all through an alarm. The alarm list and its pictures are
  * served from these copies, so they show at once and without the cameras.
+ * With an alarm's own pictures come the camera's other ones (of motion, say)
+ * from a few seconds before it to a few seconds after. The camera's video of
+ * an alarm is only noted; it is copied when someone asks to watch it, and
+ * kept a day as well.
  *
  * Alarms are passed to the page as kioskNative.event({cam, code, action, index})
  * and reachability as kioskNative.status({cam, online}); "cam" is the camera's
@@ -69,6 +74,11 @@ final class Cameras {
     private static final int THUMB_WIDTH = 480;
     // A copy's name tells all about it: "<taken, ms>_<camera>_<rules, joined by +>_<its place on the card, hashed>.jpg".
     private static final Pattern KEPT = Pattern.compile("(\\d+)_(\\d+)_([\\w+]*)_[0-9A-F]+\\.jpg");
+    // A copied video's name: "<begins, ms>_<camera>_<lasts, s>_<its place on the card, hashed>.mp4".
+    private static final Pattern CLIP = Pattern.compile("(\\d+)_(\\d+)_(\\d+)_[0-9A-F]+\\.mp4");
+    private static final long CLIP_NEAR_MS = 5000;       // a recording this close to an alarm is a video of it
+    private static final long CLIP_SETTLED_MS = 20000;   // ...and is offered once it has been over for this long
+    private static final long FAILURE_TOLD_MS = 15000;   // how long a failed copy waits to be told of
 
     private final Page page;
     private final File store;                 // the copies in full; small ones for lists in "small" inside it
@@ -78,6 +88,9 @@ final class Cameras {
     private volatile Set<String> codes = Collections.emptySet();
     private volatile Set<Integer> silent = Collections.emptySet();   // cameras that did not answer the last time
     private volatile long copiedAt;
+    private volatile long aroundMs = 10000;   // the camera's other pictures are kept from this long before an alarm to this long after
+    private volatile Map<Integer, List<Recording>> recordings = Collections.emptyMap();   // each camera's videos of the last day, as its card lists them
+    private final Map<String, Fetch> fetches = new HashMap<>();                           // videos being copied, by the name of the copy
     private Keeper keeper;
 
     Cameras(Page page, File store) {
@@ -90,8 +103,10 @@ final class Cameras {
         stop();
         List<Camera> found = new ArrayList<>();
         String codes;
+        long around;
         try {
             JSONObject settings = new JSONObject(json);
+            around = Math.max(0, Math.min(60, settings.getJSONObject("alarm").optInt("around_seconds", 10))) * 1000L;
             String user = settings.optString("camera_user");
             String password = settings.optString("camera_password");
             codes = settings.getJSONObject("alarm").getJSONArray("codes").join(",").replace("\"", "");
@@ -105,6 +120,7 @@ final class Cameras {
             return;
         }
         cameras = found;
+        aroundMs = around;
         this.codes = new HashSet<>(java.util.Arrays.asList(codes.split(",")));
         keeper = new Keeper();
         keeper.start();
@@ -140,11 +156,20 @@ final class Cameras {
         return PageClient.failure(502, "Bad Gateway");
     }
 
-    /** The page's "/cam/..." requests: the alarm list, one of its pictures, what an alarm has brought, or a fresh snapshot. */
-    WebResourceResponse answer(Uri url) {
+    /**
+     * The page's "/cam/..." requests: the alarm list, one of its pictures, a
+     * video of an alarm (first asked for, then played, in parts), what an
+     * alarm has brought, or a fresh snapshot.
+     */
+    WebResourceResponse answer(Uri url, String range) {
         String path = url.getPath() == null ? "" : url.getPath();
         try {
             if (path.equals("/cam/alarms")) return json(alarms());
+            if (path.equals("/cam/clip/get")) return json(clipState(url.getQueryParameter("file")));
+            if (path.equals("/cam/clip")) {
+                File video = clip(url.getQueryParameter("file"));
+                return video == null ? PageClient.failure(404, "Not Found") : PageClient.part(video, "video/mp4", range);
+            }
             if (path.equals("/cam/shot")) {
                 byte[] jpeg = picture(url.getQueryParameter("file"), !"full".equals(url.getQueryParameter("size")));
                 if (jpeg == null) return PageClient.failure(404, "Not Found");
@@ -168,9 +193,11 @@ final class Cameras {
     /**
      * The alarms of the last day, from the tablet's copies of the cameras' own
      * pictures: pictures of one camera less than a minute apart are one alarm.
-     * JSON: {"alarms": [{cam, name, at, codes, shots: [{at, file}]}], "failed":
-     * [names of the cameras that did not answer when last asked]}, the newest
-     * first, times in milliseconds. Asking also sends for what is new, soon.
+     * JSON: {"alarms": [{cam, name, at, codes, shots: [{at, file}], videos:
+     * [{file, at, seconds}]}], "failed": [names of the cameras that did not
+     * answer when last asked]}, the newest first, times in milliseconds. The
+     * videos are the camera's recordings of that alarm; they are still on its
+     * card (see clipState). Asking also sends for what is new, soon.
      */
     String alarms() {
         long now = System.currentTimeMillis();
@@ -178,27 +205,48 @@ final class Cameras {
         if (sender != null && now - copiedAt > COPY_SOON_MS) sender.hurry();
         List<Camera> known = cameras;
         List<String> names = kept(-1, now - KEPT_MS);
+        Map<Integer, List<Recording>> recorded = recordings;
+        List<Alarm> found = new ArrayList<>();
         List<JSONObject> all = new ArrayList<>();
         try {
             for (int position = 0; position < known.size(); position++) {
-                JSONObject alarm = null;
-                long last = 0;
+                Alarm alarm = null;
                 for (String name : names) {
                     Matcher told = KEPT.matcher(name);
                     if (!told.matches() || Integer.parseInt(told.group(2)) != position) continue;
                     long at = Long.parseLong(told.group(1));
-                    if (alarm == null || at - last > ALARM_GAP_MS) {
-                        alarm = new JSONObject().put("cam", position).put("name", known.get(position).name).put("at", at)
-                                .put("codes", new JSONArray()).put("shots", new JSONArray());
-                        all.add(alarm);
+                    boolean rule = !told.group(3).isEmpty();   // an alarm rule took it; if none did, it is from around an alarm
+                    // A new alarm begins a minute after the last picture a rule took. A picture from
+                    // around an alarm goes with the alarm it is close to: the last one, or one about to begin.
+                    long limit = alarm == null || rule || alarm.first == 0 ? ALARM_GAP_MS : aroundMs;
+                    if (alarm == null || at - (alarm.first > 0 ? alarm.last : alarm.seen) > limit) {
+                        alarm = new Alarm(position, new JSONObject().put("cam", position).put("name", known.get(position).name)
+                                .put("at", at).put("codes", new JSONArray()).put("shots", new JSONArray()));
+                        found.add(alarm);
                     }
-                    JSONArray fired = alarm.getJSONArray("codes");
+                    JSONArray fired = alarm.json.getJSONArray("codes");
                     for (String code : told.group(3).split("\\+")) {
                         if (!code.isEmpty() && !fired.toString().contains("\"" + code + "\"")) fired.put(code);
                     }
-                    alarm.getJSONArray("shots").put(new JSONObject().put("at", at).put("file", name));
-                    last = at;
+                    alarm.json.getJSONArray("shots").put(new JSONObject().put("at", at).put("file", name));
+                    alarm.seen = at;
+                    if (rule) {
+                        if (alarm.first == 0) alarm.first = at;
+                        alarm.last = at;
+                    }
                 }
+            }
+            for (Alarm alarm : found) {
+                if (alarm.first == 0) continue;   // only pictures from around an alarm whose own are gone: nothing to list
+                JSONArray videos = new JSONArray();
+                List<Recording> clips = recorded.get(alarm.position);
+                for (int i = 0; clips != null && i < clips.size(); i++) {
+                    Recording clip = clips.get(i);
+                    if (clip.end < alarm.first - CLIP_NEAR_MS || clip.start > alarm.last + CLIP_NEAR_MS) continue;
+                    if (clip.end > now - CLIP_SETTLED_MS) continue;   // perhaps still being recorded
+                    videos.put(new JSONObject().put("file", clip.name).put("at", clip.start).put("seconds", (clip.end - clip.start) / 1000));
+                }
+                all.add(alarm.json.put("videos", videos));
             }
             Collections.sort(all, (a, b) -> Long.compare(b.optLong("at"), a.optLong("at")));
             JSONArray failed = new JSONArray();
@@ -211,12 +259,136 @@ final class Cameras {
         }
     }
 
+    /** An alarm of the list in the making: when its rules took their first and last picture, and when its last picture of any kind was taken. */
+    private static final class Alarm {
+        final int position;
+        final JSONObject json;
+        long first;
+        long last;
+        long seen;
+
+        Alarm(int position, JSONObject json) {
+            this.position = position;
+            this.json = json;
+        }
+    }
+
+    /** A video on a camera's card: when it runs, where it is, how big, and what its copy on the tablet is called. */
+    private static final class Recording {
+        final long start;
+        final long end;
+        final String path;
+        final long bytes;
+        final String name;
+
+        Recording(long start, long end, String path, long bytes, String name) {
+            this.start = start;
+            this.end = end;
+            this.path = path;
+            this.bytes = bytes;
+            this.name = name;
+        }
+    }
+
+    /** A video on its way from a camera to the tablet. */
+    private static final class Fetch {
+        final long size;
+        volatile long got;
+        volatile String failed;
+        volatile long failedAt;
+
+        Fetch(long size) {
+            this.size = size;
+        }
+    }
+
+    /**
+     * Someone wants to watch a video of an alarm: it is copied from the
+     * camera's card, unless it is here already. Asked again and again while it
+     * comes. JSON: {done: true} when it can be played ("/cam/clip"), {done:
+     * false, got, size} on the way, {failed: why} when it did not come.
+     */
+    String clipState(String file) {
+        try {
+            Matcher told = file == null ? null : CLIP.matcher(file);
+            if (told == null || !told.matches()) return new JSONObject().put("failed", "No such video.").toString();
+            final File video = new File(new File(store, "video"), file);
+            if (video.isFile()) return new JSONObject().put("done", true).toString();
+            synchronized (fetches) {
+                Fetch fetch = fetches.get(file);
+                if (fetch != null && fetch.failed != null) {
+                    fetches.remove(file);
+                    if (System.currentTimeMillis() - fetch.failedAt < FAILURE_TOLD_MS) return new JSONObject().put("failed", fetch.failed).toString();
+                    fetch = null;   // an old failure nobody waited for: try again
+                }
+                if (fetch == null) {
+                    int position = Integer.parseInt(told.group(2));
+                    List<Camera> known = cameras;
+                    List<Recording> clips = recordings.get(position);
+                    Recording wanted = null;
+                    for (int i = 0; clips != null && i < clips.size(); i++) {
+                        if (clips.get(i).name.equals(file)) wanted = clips.get(i);
+                    }
+                    if (wanted == null || position >= known.size()) {
+                        return new JSONObject().put("failed", "The camera no longer lists this video.").toString();
+                    }
+                    final Fetch begun = fetch = new Fetch(wanted.bytes);
+                    final Camera camera = known.get(position);
+                    final Recording from = wanted;
+                    fetches.put(file, fetch);
+                    new Thread(() -> fetch(camera, from, video, begun), "camera-video").start();
+                }
+                return new JSONObject().put("done", false).put("got", fetch.got).put("size", fetch.size).toString();
+            }
+        } catch (JSONException impossible) {
+            return "{\"failed\":\"\"}";
+        }
+    }
+
+    /** The copy of a video, when it is here whole; else null. */
+    File clip(String file) {
+        if (file == null || !CLIP.matcher(file).matches()) return null;
+        File video = new File(new File(store, "video"), file);
+        return video.isFile() ? video : null;
+    }
+
+    /** Copies one video from a camera's card to the tablet: tens of megabytes, so straight into a file. */
+    private void fetch(Camera camera, Recording wanted, File video, Fetch fetch) {
+        File part = new File(video.getPath() + ".part");
+        try {
+            video.getParentFile().mkdirs();
+            HttpURLConnection reply = camera.login.get(onCard(camera, wanted.path), SNAPSHOT_TIMEOUT_MS);
+            try {
+                if (reply.getResponseCode() != HttpURLConnection.HTTP_OK) throw new IOException("HTTP " + reply.getResponseCode());
+                try (InputStream in = reply.getInputStream(); FileOutputStream out = new FileOutputStream(part)) {
+                    byte[] chunk = new byte[65536];
+                    for (int n = in.read(chunk); n > 0; n = in.read(chunk)) {
+                        out.write(chunk, 0, n);
+                        fetch.got += n;
+                    }
+                }
+            } finally {
+                reply.disconnect();
+            }
+            if (part.length() < wanted.bytes) throw new IOException("only " + part.length() + " of " + wanted.bytes + " bytes came");
+            if (!part.renameTo(video)) throw new IOException("the copy could not be kept");
+            synchronized (fetches) {
+                fetches.remove(video.getName());
+            }
+        } catch (IOException | RuntimeException failed) {
+            Log.w(TAG, "A video could not be copied from its camera: " + failed);
+            part.delete();
+            fetch.failedAt = System.currentTimeMillis();
+            fetch.failed = "The video could not be copied from the camera.";
+        }
+    }
+
     /**
      * During an alarm: what one camera has taken since that moment, copied over
      * first, oldest first, as JSON [{at, file}].
      */
     String since(int position, long moment) {
-        copy(position, moment);
+        copy(position, moment, false);
         JSONArray found = new JSONArray();
         try {
             for (String name : kept(position, moment)) {
@@ -258,22 +430,42 @@ final class Cameras {
     /**
      * Copies to the tablet what one camera has recorded since then and is not
      * here yet, the newest first: each picture in full (about a megabyte), and
-     * a small one for lists. False when the camera could not be asked.
+     * a small one for lists. That is every picture an alarm rule took, and the
+     * camera's other pictures (of motion, say) from a few seconds before an
+     * alarm to a few seconds after it. With `videos`, the camera's video
+     * recordings of that time are noted as well (not copied: see clipState).
+     * False when the camera could not be asked.
      */
-    private boolean copy(int position, long since) {
+    private boolean copy(int position, long since, boolean videos) {
         List<Camera> asked = cameras;
         if (position < 0 || position >= asked.size() || asked.get(position).host.isEmpty()) return true;
         Camera camera = asked.get(position);
         SimpleDateFormat stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);   // the camera's own clock
         synchronized (copying) {
             try {
-                List<Card.Shot> shots = Card.find(camera.host, camera.user, camera.password,
-                        stamp.format(new Date(since)), stamp.format(new Date(System.currentTimeMillis() + 600000)), codes);
-                Collections.sort(shots, (a, b) -> b.time.compareTo(a.time));
+                Card.Found found = Card.find(camera.host, camera.user, camera.password,
+                        stamp.format(new Date(since)), stamp.format(new Date(System.currentTimeMillis() + 600000)), videos);
+                List<Card.Shot> shots = found.shots;
+                Collections.sort(shots, (a, b) -> a.time.compareTo(b.time));
+                long[] taken = new long[shots.size()];
+                String[] rules = new String[shots.size()];   // the alarm rules that fired for each picture, joined by +
+                List<long[]> alarms = new ArrayList<>();      // each alarm's first and last picture
+                for (int i = 0; i < taken.length; i++) {
+                    taken[i] = stamp.parse(shots.get(i).time).getTime();
+                    List<String> fired = new ArrayList<>(shots.get(i).codes);
+                    fired.retainAll(codes);
+                    rules[i] = android.text.TextUtils.join("+", fired);
+                    if (rules[i].isEmpty()) continue;
+                    long[] last = alarms.isEmpty() ? null : alarms.get(alarms.size() - 1);
+                    if (last == null || taken[i] - last[1] > ALARM_GAP_MS) alarms.add(new long[] {taken[i], taken[i]});
+                    else last[1] = taken[i];
+                }
                 File small = new File(store, "small");
                 small.mkdirs();
-                for (Card.Shot shot : shots) {
-                    String name = stamp.parse(shot.time).getTime() + "_" + position + "_" + android.text.TextUtils.join("+", shot.codes)
+                for (int i = taken.length - 1; i >= 0; i--) {
+                    if (rules[i].isEmpty() && !around(alarms, taken[i])) continue;
+                    Card.Shot shot = shots.get(i);
+                    String name = taken[i] + "_" + position + "_" + rules[i]
                             + "_" + Card.md5(camera.host + shot.path).substring(0, 12) + ".jpg";
                     File full = new File(store, name);
                     if (full.isFile() || !KEPT.matcher(name).matches()) continue;
@@ -281,6 +473,19 @@ final class Cameras {
                     if (jpeg == null) continue;
                     write(new File(small, name), shrunk(jpeg));
                     write(full, jpeg);
+                }
+                if (videos) {
+                    List<Recording> noted = new ArrayList<>();
+                    for (Card.Clip clip : found.clips) {
+                        if (!clip.path.toLowerCase(Locale.ROOT).endsWith(".mp4")) continue;   // the kind the page can play
+                        long start = stamp.parse(clip.start).getTime(), end = stamp.parse(clip.end).getTime();
+                        noted.add(new Recording(start, end, clip.path, clip.bytes, start + "_" + position + "_"
+                                + Math.max(1, (end - start) / 1000) + "_" + Card.md5(camera.host + clip.path).substring(0, 12) + ".mp4"));
+                    }
+                    Collections.sort(noted, (a, b) -> Long.compare(a.start, b.start));
+                    Map<Integer, List<Recording>> all = new HashMap<>(recordings);
+                    all.put(position, noted);
+                    recordings = all;
                 }
                 return true;
             } catch (IOException | JSONException | ParseException | RuntimeException unanswered) {
@@ -290,15 +495,28 @@ final class Cameras {
         }
     }
 
-    /** One picture from a camera's card, by its place there; null when the camera does not give it. */
-    private static byte[] load(Camera camera, String path) throws IOException {
+    /** True when that moment is within a few seconds of one of those alarms. */
+    private boolean around(List<long[]> alarms, long moment) {
+        for (long[] alarm : alarms) {
+            if (moment >= alarm[0] - aroundMs && moment <= alarm[1] + aroundMs) return true;
+        }
+        return false;
+    }
+
+    /** Where the camera hands out a file of its card, by the file's place there. */
+    private static String onCard(Camera camera, String path) {
         StringBuilder address = new StringBuilder("http://" + camera.host + "/cgi-bin/RPC_Loadfile");
         for (byte b : path.getBytes(StandardCharsets.UTF_8)) {
             char c = (char) (b & 0xff);
             if (c < 128 && (Character.isLetterOrDigit(c) || "/_.-~".indexOf(c) >= 0)) address.append(c);
             else address.append(String.format(Locale.ROOT, "%%%02X", b & 0xff));
         }
-        HttpURLConnection reply = camera.login.get(address.toString(), SNAPSHOT_TIMEOUT_MS);
+        return address.toString();
+    }
+
+    /** One picture from a camera's card, by its place there; null when the camera does not give it. */
+    private static byte[] load(Camera camera, String path) throws IOException {
+        HttpURLConnection reply = camera.login.get(onCard(camera, path), SNAPSHOT_TIMEOUT_MS);
         try {
             if (reply.getResponseCode() != HttpURLConnection.HTTP_OK) {
                 Log.w(TAG, "Stored picture refused: HTTP " + reply.getResponseCode());
@@ -372,7 +590,7 @@ final class Cameras {
                 long now = System.currentTimeMillis();
                 Set<Integer> unanswered = new HashSet<>();
                 for (int position = 0; position < cameras.size() && !closed; position++) {
-                    if (!copy(position, now - KEPT_MS)) unanswered.add(position);
+                    if (!copy(position, now - KEPT_MS, true)) unanswered.add(position);
                 }
                 if (closed) return;
                 silent = unanswered;
@@ -384,6 +602,20 @@ final class Cameras {
                         boolean old = told.matches() ? Long.parseLong(told.group(1)) < now - KEPT_MS : names[i].endsWith(".part");
                         if (old) new File(folder, names[i]).delete();
                     }
+                }
+                File videos = new File(store, "video");
+                String[] watched = videos.list();
+                for (int i = 0; watched != null && i < watched.length; i++) {
+                    Matcher told = CLIP.matcher(watched[i]);
+                    boolean old;
+                    if (told.matches()) {
+                        old = Long.parseLong(told.group(1)) < now - KEPT_MS;
+                    } else {   // what an interrupted copy left behind
+                        synchronized (fetches) {
+                            old = !fetches.containsKey(watched[i].replace(".part", ""));
+                        }
+                    }
+                    if (old) new File(videos, watched[i]).delete();
                 }
                 synchronized (this) {
                     try {

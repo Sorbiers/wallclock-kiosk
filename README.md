@@ -19,7 +19,9 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   cameras took themselves. The app copies them from the cameras' SD cards and
   keeps them for a day, so the list shows at once, is whole whether or not the
   tablet was awake, and does not need the cameras; a tap opens a picture full
-  screen.
+  screen. With an alarm's own pictures come the camera's other ones from a few
+  seconds around it. Where the camera recorded a video of the alarm, a button
+  fetches it from the camera's card and plays it.
 - **Weather** — now, the next 24 hours and 7 days (Open-Meteo; in Canada the
   current conditions come from an Environment Canada station).
 - **News** — a newspaper page: small charts of USD/CAD, bitcoin, the Bank of
@@ -72,7 +74,8 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
 - The camera login is stored on the tablet in the app's private settings: use a
   camera user that can only view. For the Events page that user must also be
   allowed to search the camera's recordings, and the camera must have an SD
-  card and be set to save a picture when a rule fires.
+  card and be set to save a picture when a rule fires; for the videos, to
+  record them as MP4 files in H.264.
 - The cameras are only read; nothing on them is changed.
 - A hobby project: lightly tested, English interface. The one automated test,
   `python tools/test_remote.py`, checks who the remote control lets in.

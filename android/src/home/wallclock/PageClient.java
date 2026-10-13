@@ -61,7 +61,7 @@ final class PageClient extends WebViewClient {
         Uri url = request.getUrl();
         if (!HOST.equals(url.getHost())) return null;
         String path = url.getPath() == null ? "/" : url.getPath();
-        if (path.startsWith("/cam/")) return cameras.answer(url);
+        if (path.startsWith("/cam/")) return cameras.answer(url, header(request, "Range"));
         if (path.startsWith("/slides/")) return slide(url.getPathSegments());
         if (path.startsWith("/media/")) return media(new File(path).getName(), header(request, "Range"));
         if (path.startsWith("/feed/")) return feed(url);
@@ -102,15 +102,19 @@ final class PageClient extends WebViewClient {
         return !name.isEmpty() && !name.startsWith(".") && name.indexOf('/') < 0 && name.indexOf('\\') < 0;
     }
 
-    /**
-     * A file for the alarm clock. A player asks for a video in parts ("Range"),
-     * also to look ahead in it, so a part is what it gets.
-     */
+    /** A file for the alarm clock. */
     private WebResourceResponse media(String name, String range) {
+        if (media == null || !isMedia(name)) return failure(404, "Not Found");
+        return part(new File(media, name), mimeType(name.toLowerCase()), range);
+    }
+
+    /**
+     * A file, or the part of it asked for: a player asks for a video in parts
+     * ("Range"), also to look ahead in it, so a part is what it gets.
+     */
+    static WebResourceResponse part(File file, String type, String range) {
         try {
-            File file = new File(media, name);
-            if (media == null || !isMedia(name) || !file.isFile()) return failure(404, "Not Found");
-            String type = mimeType(name.toLowerCase());
+            if (!file.isFile()) return failure(404, "Not Found");
             long size = file.length(), from = 0, to = size - 1;
             Map<String, String> headers = new HashMap<>();
             headers.put("Accept-Ranges", "bytes");
@@ -127,16 +131,16 @@ final class PageClient extends WebViewClient {
                 headers.put("Content-Range", "bytes " + from + "-" + to + "/" + size);
             }
             headers.put("Content-Length", String.valueOf(to - from + 1));
-            FileInputStream in = new FileInputStream(file);
-            in.getChannel().position(from);
+            // The stream is the file from its start: the WebView takes it for the whole file and
+            // skips to the first byte asked for itself. It only has to end at the last byte asked for.
             return new WebResourceResponse(type, null, part ? 206 : 200, part ? "Partial Content" : "OK",
-                    headers, new Part(in, to - from + 1));
+                    headers, new Part(new FileInputStream(file), to + 1));
         } catch (IOException | RuntimeException unreadable) {
             return failure(404, "Not Found");
         }
     }
 
-    /** A stream that ends after `left` bytes. */
+    /** A stream that ends after `left` bytes, read or skipped. */
     private static final class Part extends FilterInputStream {
         private long left;
 
@@ -159,6 +163,18 @@ final class PageClient extends WebViewClient {
             int got = super.read(into, offset, (int) Math.min(length, left));
             if (got > 0) left -= got;
             return got;
+        }
+
+        @Override
+        public long skip(long count) throws IOException {
+            long skipped = super.skip(Math.max(0, Math.min(count, left)));
+            left -= skipped;
+            return skipped;
+        }
+
+        @Override
+        public int available() throws IOException {   // the WebView reads the file's size from this
+            return (int) Math.min(Integer.MAX_VALUE, Math.min(left, super.available()));
         }
     }
 

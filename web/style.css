@@ -387,7 +387,7 @@ body.night .up, body.night .down { color: inherit; }   /* no bright colours at n
 
 /* --- camera alarms of the last 24 hours: a list, and one picture full screen -- */
 #view-events { padding: 4vh 4vw 0; opacity: 1; }   /* pictures are never dimmed at night; the words around them are */
-#view-events .head, .ev-meta { opacity: var(--dim); }
+#view-events .head, .ev-meta, .ev-videos { opacity: var(--dim); }
 .ev-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16vh; scrollbar-width: none; }   /* room for the buttons */
 .ev {
   display: grid;
@@ -404,6 +404,19 @@ body.night .up, body.night .down { color: inherit; }   /* no bright colours at n
 .ev-strip img { flex: none; height: 19vh; aspect-ratio: 16 / 9; object-fit: cover; background: #111; }
 .ev-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 12vw; font-size: 3.4vh; text-align: center; opacity: 0.7; }
 .ev-empty[hidden] { display: none; }
+.ev-videos { grid-column: 2; display: flex; flex-wrap: wrap; gap: 1.4vh 1.6vw; margin-top: -1vw; }   /* under the pictures, close to them */
+.ev-video {
+  font: inherit;
+  font-size: 2.2vh;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg);
+  background: none;
+  border: 0.2vh solid var(--fg);
+  border-radius: 99vh;
+  padding: 1.2vh 2.4vw;
+}
 
 .shot { position: fixed; inset: 0; z-index: 9; background: #000; color: #fff; }
 .shot[hidden] { display: none; }
@@ -425,6 +438,14 @@ body.night .up, body.night .down { color: inherit; }   /* no bright colours at n
 .shot-step[hidden] { display: none; }
 #shot-prev { left: 0; text-align: left; padding-left: 3vw; }
 #shot-next { right: 0; text-align: right; padding-right: 3vw; }
+
+/* a video of an alarm, full screen: the player's own buttons are along the bottom, so Close is at the top */
+#clip-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+#clip-video[hidden] { display: none; }
+.clip-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 12vw; font-size: 3.4vh; text-align: center; opacity: 0.8; }
+.clip-note[hidden] { display: none; }
+#clip .alarm-top { padding-right: 32vw; }
+#clip-close { top: 2vh; bottom: auto; padding: 1.6vh 3.4vw; font-size: 3vh; }
 
 /* --- settings: a plain form, never dimmed ----------------------------------- */
 #view-settings { opacity: 1; color: #fff; background: #000; overflow-y: auto; }   /* a page of its own: nothing shows through */
@@ -729,6 +750,11 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .ev-what { margin: 0; font-size: 2.6vw; }
   .ev-strip { gap: 1.6vw; }
   .ev-strip img { height: 11vh; }
+  .ev-videos { grid-column: 1; margin-top: 0; gap: 1.2vh 2.4vw; }
+  .ev-video { font-size: 2.8vw; padding: 1vh 4vw; }
+  .clip-note { font-size: 4.4vw; }
+  #clip .alarm-top { padding-right: 36vw; }
+  #clip-close { font-size: 3.6vw; padding: 1.2vh 5vw; }
   .ev-empty { font-size: 4.4vw; }
   .shot-step { font-size: 16vw; }
 

@@ -50,6 +50,7 @@
     views: { camera_timeout_minutes: 10, weather_timeout_minutes: 0, buttons_hide_seconds: 6 },
     alarm: {
       min_total_seconds: 60, min_picture_seconds: 10, max_pictures: 12,
+      around_seconds: 10,   // the camera's other pictures (of motion, say) are kept from this long before an alarm to this long after
       codes: ["CrossLineDetection", "CrossRegionDetection"],
       sound: "beep", sound_seconds: 1, volume: -1,   // sound: "none", "beep" or one of SOUNDS; volume -1 = as the tablet is set
     },
@@ -357,7 +358,7 @@
   // minute: a screen set too dark to read can always be put right.
   function updateMode() {
     const rescued = Date.now() < rescueUntil;
-    const used = rescued || view === "settings" || !$("shot").hidden || !$("chart").hidden || Date.now() - lastTouch < DAY_PEEK_MS;
+    const used = rescued || view === "settings" || !$("shot").hidden || !$("clip").hidden || !$("chart").hidden || Date.now() - lastTouch < DAY_PEEK_MS;
     const alarmed = alarm.open || ringing;
     night = previewMode ? previewMode === "night" : isNight(new Date()) && !used;
     document.body.classList.toggle("night", night);
@@ -1452,13 +1453,20 @@
   // them for a day (Cameras in the app): "/cam/alarms" lists the alarms, the
   // newest first, "/cam/shot" is one picture, small or in full. So the list
   // shows at once, without the cameras, and is whole whether or not this page
-  // was awake when it happened.
+  // was awake when it happened. Where a camera also recorded a video of an
+  // alarm, the alarm has a button for it: the app then copies the video from
+  // the camera's card ("/cam/clip/get", asked until it is done), keeps it for
+  // a day too, and the page plays it ("/cam/clip").
   const EVENTS_AGAIN_MS = 60000;   // an open page asks again this often
   const shot = { entry: null, idx: 0 };   // the picture opened full screen
   let eventsAsked = 0;
   let eventsShown = null;   // what the list was last built from, as text: it is rebuilt only when that changes
   let eventsAt = 0;
+  const clip = { file: null, timer: null };   // the video opened full screen
+  const CLIP_ASK_MS = 600;                    // how often a video on its way is asked after
   const shotUrl = (one, size) => "/cam/shot?size=" + size + "&file=" + encodeURIComponent(one.file);
+  const clock = (when) => pad(when.getHours()) + ":" + pad(when.getMinutes());
+  const lasting = (seconds) => Math.floor(seconds / 60) + ":" + pad(seconds % 60);
 
   async function renderEvents() {
     const asked = ++eventsAsked;
@@ -1500,12 +1508,24 @@
       });
       const row = el("article", "ev");
       row.append(meta, strip);
+      if (entry.videos && entry.videos.length) {
+        const videos = el("div", "ev-videos");
+        entry.videos.forEach((one) => {
+          const several = entry.videos.length > 1;
+          const button = el("button", "ev-video", "\u25B6 " + (several ? "Video " + clock(new Date(one.at)) : "Watch video")
+            + " \u00B7 " + lasting(one.seconds));
+          button.type = "button";
+          button.addEventListener("click", () => openClip(entry, one));
+          videos.appendChild(button);
+        });
+        row.appendChild(videos);
+      }
       list.appendChild(row);
     });
   }
 
   function checkEvents() {   // from the clock tick
-    if (view === "events" && $("shot").hidden && Date.now() - eventsAt > EVENTS_AGAIN_MS) renderEvents();
+    if (view === "events" && $("shot").hidden && $("clip").hidden && Date.now() - eventsAt > EVENTS_AGAIN_MS) renderEvents();
   }
 
   function openShot(entry, i) {
@@ -1531,8 +1551,72 @@
     shot.entry = null;
   }
 
+  // A video of an alarm: the camera's own recording. It is still on the
+  // camera's card when first asked for: the app copies it over, which takes
+  // some seconds, and is asked how far it is until it is done. Then it plays,
+  // with the player's own buttons to pause it and to move about in it.
+  function openClip(entry, one) {
+    closeClip();
+    clip.file = one.file;
+    const when = new Date(one.at);
+    $("clip-caption").textContent = entry.name + " \u00B7 " + labelOf(entry.codes) + " \u00B7 "
+      + clock(when) + ":" + pad(when.getSeconds()) + " \u00B7 " + lasting(one.seconds);
+    $("clip-video").hidden = true;
+    $("clip-note").hidden = false;
+    $("clip-note").textContent = "Asking for the video";
+    $("clip").hidden = false;
+    updateMode();
+    fetchClip(one.file);
+  }
+
+  async function fetchClip(file) {
+    let told = null;
+    try {
+      const reply = await fetch("/cam/clip/get?file=" + encodeURIComponent(file));
+      if (reply.ok) told = await reply.json();
+    } catch (e) { /* said below */ }
+    if (clip.file !== file) return;   // closed meanwhile
+    if (!told || told.failed != null) {
+      $("clip-note").textContent = (told && told.failed) || "The video could not be fetched.";
+      return;
+    }
+    if (!told.done) {
+      $("clip-note").textContent = "Copying the video from the camera"
+        + (told.size > 0 ? " \u00B7 " + Math.min(99, Math.round(100 * told.got / told.size)) + " %" : "");
+      clip.timer = setTimeout(() => fetchClip(file), CLIP_ASK_MS);
+      return;
+    }
+    const video = $("clip-video");
+    $("clip-note").hidden = true;
+    video.hidden = false;
+    video.src = "/cam/clip?file=" + encodeURIComponent(file);
+    video.play().catch(() => { /* its own play button remains */ });
+  }
+
+  function closeClip() {
+    clearTimeout(clip.timer);
+    clip.file = null;
+    const video = $("clip-video");
+    video.pause();
+    if (video.hasAttribute("src")) {
+      video.removeAttribute("src");
+      video.load();   // lets go of the file
+    }
+    $("clip").hidden = true;
+    updateMode();
+  }
+
+  $("clip-video").addEventListener("error", () => {
+    if (!clip.file) return;
+    $("clip-video").hidden = true;
+    $("clip-note").hidden = false;
+    $("clip-note").textContent = "This video cannot be played here.";
+  });
+  $("clip-close").addEventListener("click", closeClip);
+
   function closeEvents() {   // leaving the page: let go of its pictures
     closeShot();
+    closeClip();
     $("ev-list").textContent = "";
     eventsShown = null;
   }
@@ -1832,6 +1916,7 @@
       ["alarm.min_total_seconds", "Alarm stays on screen at least, s", "number", number],
       ["alarm.min_picture_seconds", "Each alarm picture at least, s", "number", number],
       ["alarm.max_pictures", "Pictures per alarm, at most", "number", number],
+      ["alarm.around_seconds", "Keep the camera's other pictures too, this many s before and after an alarm (0 = none)", "number", number],
       ["alarm.sound", "Sound on a camera alarm", [["none", "None"], ["beep", "Short beep"]].concat(SOUND_NAMES)],
       ["alarm.sound_seconds", "\u2026plays for, s", "number", number],
       ["alarm.volume", "\u2026volume, % of the loudest (empty = as the tablet is set)", "number", percent],

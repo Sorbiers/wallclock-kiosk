@@ -16,11 +16,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * The pictures an Amcrest/Dahua camera keeps on its SD card when one of its
- * rules fires, found the way the camera's own web page finds them: the RPC2
+ * rules fires, and the videos it records, found the way the camera's own web page finds them: the RPC2
  * JSON interface (log in by challenge and response, then "mediaFileFind").
  * Read-only: nothing on the camera is changed. The login needs the right to
  * search the camera's recordings.
@@ -39,8 +38,28 @@ final class Card {
         }
     }
 
+    /** One recorded video: from when to when (camera time), where it is on the card, how big. */
+    static final class Clip {
+        final String start;
+        final String end;
+        final String path;
+        final long bytes;
+
+        Clip(String start, String end, String path, long bytes) {
+            this.start = start;
+            this.end = end;
+            this.path = path;
+            this.bytes = bytes;
+        }
+    }
+
+    /** What a card holds from a span of time. */
+    static final class Found {
+        final List<Shot> shots = new ArrayList<>();
+        final List<Clip> clips = new ArrayList<>();
+    }
+
     private static final int MAX_SCANNED = 4000;   // files looked at per search
-    private static final int MAX_FOUND = 600;
 
     private final String host;
     private Object session;
@@ -50,13 +69,33 @@ final class Card {
         this.host = host;
     }
 
-    /** The pictures taken between the two times for any of the given rules, in no particular order. */
-    static List<Shot> find(String host, String user, String password, String from, String to, Set<String> codes)
+    /**
+     * Every picture taken between the two times, each with the rules that
+     * fired for it, and, when asked for, the videos recorded then; in no
+     * particular order.
+     */
+    static Found find(String host, String user, String password, String from, String to, boolean videos)
             throws IOException, JSONException {
         Card card = new Card(host);
         card.login(user, password);
         try {
-            return card.search(from, to, codes);
+            Found found = new Found();
+            for (JSONObject info : card.search(from, to, "jpg")) {
+                JSONArray events = info.optJSONArray("Events");
+                List<String> fired = new ArrayList<>();
+                for (int e = 0; events != null && e < events.length(); e++) fired.add(events.optString(e));
+                if (!info.optString("FilePath").isEmpty()) {
+                    found.shots.add(new Shot(info.optString("StartTime"), info.optString("FilePath"), fired));
+                }
+            }
+            if (videos) {
+                for (JSONObject info : card.search(from, to, "dav")) {   // the camera's word for a recording, whatever the file's kind
+                    if (info.optString("FilePath").isEmpty() || info.optString("EndTime").isEmpty()) continue;
+                    found.clips.add(new Clip(info.optString("StartTime"), info.optString("EndTime"), info.optString("FilePath"),
+                            info.optLong("Length")));
+                }
+            }
+            return found;
         } finally {
             card.quietly("/RPC2", "global.logout", null, null);   // cameras allow only so many sessions
         }
@@ -77,31 +116,21 @@ final class Card {
         if (!result.optBoolean("result")) throw new IOException("Camera refused the login: " + result.opt("error"));
     }
 
-    private List<Shot> search(String from, String to, Set<String> codes) throws IOException, JSONException {
+    /** What the card lists of one kind ("jpg", "dav") between the two times, the newest first. */
+    private List<JSONObject> search(String from, String to, String kind) throws IOException, JSONException {
         Object finder = call("/RPC2", "mediaFileFind.factory.create", null, null).opt("result");
         if (finder == null || JSONObject.NULL.equals(finder)) throw new IOException("Camera would not search its card");
-        List<Shot> found = new ArrayList<>();
+        List<JSONObject> found = new ArrayList<>();
         try {
             JSONObject condition = new JSONObject().put("Channel", 0).put("StartTime", from).put("EndTime", to)
-                    .put("Types", new JSONArray().put("jpg")).put("Order", "Descent");
+                    .put("Types", new JSONArray().put(kind)).put("Order", "Descent");
             call("/RPC2", "mediaFileFind.findFile", new JSONObject().put("condition", condition), finder);
-            for (int scanned = 0; scanned < MAX_SCANNED && found.size() < MAX_FOUND; ) {
+            while (found.size() < MAX_SCANNED) {
                 JSONObject next = call("/RPC2", "mediaFileFind.findNextFile", new JSONObject().put("count", 100), finder);
                 JSONObject params = next.optJSONObject("params");
                 JSONArray infos = params == null ? null : params.optJSONArray("infos");
                 if (infos == null || infos.length() == 0) break;
-                scanned += infos.length();
-                for (int i = 0; i < infos.length(); i++) {
-                    JSONObject info = infos.getJSONObject(i);
-                    JSONArray events = info.optJSONArray("Events");
-                    List<String> fired = new ArrayList<>();
-                    for (int e = 0; events != null && e < events.length(); e++) {
-                        if (codes.contains(events.optString(e))) fired.add(events.optString(e));
-                    }
-                    if (!fired.isEmpty() && !info.optString("FilePath").isEmpty()) {
-                        found.add(new Shot(info.optString("StartTime"), info.optString("FilePath"), fired));
-                    }
-                }
+                for (int i = 0; i < infos.length(); i++) found.add(infos.getJSONObject(i));
             }
         } finally {
             quietly("/RPC2", "mediaFileFind.close", null, finder);

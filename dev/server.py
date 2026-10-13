@@ -160,11 +160,42 @@ def _made_up_alarms() -> dict:
     now = int(time.time() * 1000)
     made = [(0, "Driveway", ["CrossLineDetection"], 40, 5), (1, "Rear", ["CrossRegionDetection"], 190, 3),
             (0, "Driveway", ["CrossLineDetection", "CrossRegionDetection"], 1500, 9)]
-    return {"failed": [], "alarms": [
+    told = {"failed": [], "alarms": [
         {"cam": cam, "name": name, "at": now - minutes * 60000, "codes": codes,
          "shots": [{"at": now - minutes * 60000 + i * 1000,
                     "file": f"{now - minutes * 60000 + i * 1000}_{cam}_{'+'.join(codes)}_{number:06X}{i:06X}.jpg"} for i in range(count)]}
         for number, (cam, name, codes, minutes, count) in enumerate(made, 1)]}
+    for alarm in told["alarms"]:   # the newest one has a video, as recorded from a little before it
+        alarm["videos"] = []
+    newest = told["alarms"][0]
+    newest["videos"] = [{"file": f"{newest['at'] - 8000}_{newest['cam']}_65_0A1B2C3D4E5F.mp4", "at": newest["at"] - 8000, "seconds": 65}]
+    return told
+
+
+_CLIPS_ASKED = {}   # when each made-up video was first asked for
+
+
+def _a_video():
+    """Any video of the media folder: it stands in for a camera's recording."""
+    return next((p for p in sorted(MEDIA_DIR.iterdir()) if p.suffix.lower() == ".mp4"), None)
+
+
+async def clip_state(request: web.Request) -> web.Response:
+    """A video of an alarm is asked for. On the tablet it is copied from the camera's card; here it "comes" in three seconds."""
+    file = request.query.get("file", "")
+    if not re.fullmatch(r"\d+_\d+_\d+_[0-9A-F]+\.mp4", file):
+        return web.json_response({"failed": "No such video."})
+    if not _a_video():
+        return web.json_response({"failed": "To try this here, put any .mp4 in the media folder."})
+    size, share = 25_000_000, (time.time() - _CLIPS_ASKED.setdefault(file, time.time())) / 3
+    return web.json_response({"done": True} if share >= 1 else {"done": False, "got": int(size * share), "size": size})
+
+
+async def clip(request: web.Request) -> web.StreamResponse:
+    video = _a_video()
+    if not video:
+        raise web.HTTPNotFound()
+    return web.FileResponse(video)
 
 
 def _made_up_shot(request: web.Request) -> web.Response:
@@ -372,6 +403,8 @@ def main() -> None:
     app.router.add_get("/cam/{cam}/snapshot.jpg", snapshot)
     app.router.add_get("/cam/alarms", card_alarms)
     app.router.add_get("/cam/shot", card_shot)
+    app.router.add_get("/cam/clip/get", clip_state)
+    app.router.add_get("/cam/clip", clip)
     app.router.add_get("/cam/{cam}/since", card_since)
     SLIDES_DIR.mkdir(exist_ok=True)
     app.router.add_get("/dev/slides", slides)
