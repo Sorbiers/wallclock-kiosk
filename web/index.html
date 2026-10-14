@@ -142,6 +142,15 @@
   <button type="button" id="shot-close" class="alarm-cancel">Close</button>
 </div>
 
+<div id="pin" class="pin" hidden>
+  <form class="pin-box" id="pin-form" autocomplete="off">
+    <div class="pin-title" id="pin-title"></div>
+    <input id="pin-input" type="password" inputmode="numeric" autocomplete="off">
+    <div class="pin-note" id="pin-note"></div>
+    <div class="pin-keys"><button type="button" id="pin-cancel">Cancel</button><button type="submit">OK</button></div>
+  </form>
+</div>
+
 <div id="clip" class="shot" hidden>
   <video id="clip-video" controls playsinline></video>
   <div class="clip-note" id="clip-note"></div>

@@ -142,9 +142,12 @@ body {
 .event-shots { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .shot-key { width: 9.6rem; aspect-ratio: 16 / 9; padding: 0; border: 0; border-radius: 0.35rem; overflow: hidden; background: #121317; cursor: zoom-in; }
 .shot-key img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.event-videos { grid-column: 2; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: -0.6rem; }
+.video-key { padding: 0.55rem 1.1rem; font-size: 0.78rem; letter-spacing: 0.14em; }
 @media (max-width: 40rem) {
   .event { grid-template-columns: 1fr; gap: 0.7rem; }
   .shot-key { width: calc(50% - 0.25rem); }
+  .event-videos { grid-column: 1; margin-top: 0; }
 }
 
 .lightbox { position: fixed; inset: 0; z-index: 5; background: #000; }
@@ -165,3 +168,10 @@ body {
 #lightbox-prev { left: 0; text-align: left; padding-left: 1.2rem; }
 #lightbox-next { right: 0; text-align: right; padding-right: 1.2rem; }
 #lightbox-close { position: absolute; right: 1.3rem; bottom: 1.3rem; padding: 0.8rem 1.6rem; }
+
+/* a video of an alarm: the player's own buttons are along the bottom, so Close is at the top */
+.lightbox video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.player-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 2rem; font-size: 0.95rem; letter-spacing: 0.1em; text-align: center; color: var(--quiet); }
+.player-note:empty { display: none; }
+#player .lightbox-top { padding-right: 9rem; }
+#player-close { position: absolute; right: 1.3rem; top: 0.7rem; padding: 0.6rem 1.4rem; }

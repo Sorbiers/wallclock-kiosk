@@ -2,7 +2,9 @@ package home.wallclock;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -21,6 +23,8 @@ import java.util.Arrays;
 public final class RemoteTest {
     private static int failed;
     private static final byte[] PICTURE = {(byte) 0xff, (byte) 0xd8, 1, 2, 3, (byte) 0xff, (byte) 0xd9};
+    private static final byte[] VIDEO = new byte[300000];   // bigger than one piece of the sending
+    private static File video;
 
     /** Stands in for the app. */
     private static final class FakeHost implements Remote.Host {
@@ -70,6 +74,20 @@ public final class RemoteTest {
             return PICTURE;
         }
 
+        public String clipState(String file) {
+            asked = file + " wanted";
+            return "{\"done\":true}";
+        }
+
+        public File clip(String file) {
+            asked = file + " sent";
+            return video;
+        }
+
+        public String secret() {
+            return "test secret";
+        }
+
         public void log(String message) {
         }
     }
@@ -85,8 +103,15 @@ public final class RemoteTest {
     }
 
     public static void main(String[] args) throws Exception {
+        for (int i = 0; i < VIDEO.length; i++) VIDEO[i] = (byte) (i * 31);
+        video = File.createTempFile("remote-test", ".mp4");
+        video.deleteOnExit();
+        try (FileOutputStream out = new FileOutputStream(video)) {
+            out.write(VIDEO);
+        }
         networks();
         server();
+        sessions();
         System.out.println(failed == 0 ? "\nAll passed." : "\n" + failed + " FAILED.");
         System.exit(failed == 0 ? 0 : 1);
     }
@@ -116,8 +141,8 @@ public final class RemoteTest {
 
     private static void server() throws Exception {
         FakeHost host = new FakeHost();
-        host.access.users.put("anna", "246810");
-        host.access.users.put("иван", "1357");   // "ivan" in Cyrillic
+        host.access.users.put("246810", new Remote.User("Anna", true));
+        host.access.users.put("1357", new Remote.User("Иван", false));   // "Ivan" in Cyrillic; may not change the settings
         int port = freePort();
         Remote remote = new Remote(port, host);
         remote.setDaemon(true);
@@ -129,42 +154,61 @@ public final class RemoteTest {
                 get(port, "/settings", null, null).text().contains("<body class=\"remote\">KIOSK"));
         check("no file outside the page's own", get(port, "/a/b.js", null, null).status == 404
                 && get(port, "/..%2Fsecret", null, null).status == 404);
-        check("the API without a name and PIN: 401", get(port, "/api/state", null, null).status == 401);
-        check("the settings without a name and PIN: 401", get(port, "/api/config", null, null).status == 401);
-        check("a wrong PIN: 401", get(port, "/api/state", "anna", "111111").status == 401);
-        check("a name not on the list: 401", get(port, "/api/state", "bob", "246810").status == 401);
-        check("another user's PIN: 401", get(port, "/api/state", "anna", "1357").status == 401);
-        Reply state = get(port, "/api/state", "Anna", "246810");
-        check("the right name (any case) and PIN: the state", state.status == 200
-                && state.text().equals("{\"user\":\"Anna\",\"tablet\":{\"view\":\"clock\"}}"));
-        check("a name in another alphabet", get(port, "/api/state", "Иван", "1357").status == 200);
-        check("a command reaches the app", post(port, "/api/command", "anna", "246810", "{\"view\":\"news\"}").status == 200
+        check("the API without a PIN: 401", get(port, "/api/state", null, null).status == 401);
+        check("the settings without a PIN: 401", get(port, "/api/config", null, null).status == 401);
+        check("a wrong PIN: 401", get(port, "/api/state", null, "111111").status == 401);
+        Reply state = get(port, "/api/state", null, "246810");
+        check("the PIN alone: the state, and who it is", state.status == 200
+                && state.text().equals("{\"user\":\"Anna\",\"settings\":true,\"tablet\":{\"view\":\"clock\"}}"));
+        check("a name sent along changes nothing", get(port, "/api/state", "bob", "246810").text().startsWith("{\"user\":\"Anna\""));
+        check("another user, named in another alphabet", get(port, "/api/state", null, "1357").text().startsWith("{\"user\":\"Иван\",\"settings\":false"));
+        check("a user without the settings may not have them, nor save them (403)", get(port, "/api/config", null, "1357").status == 403
+                && post(port, "/api/config", null, "1357", "{\"y\":1}").status == 403 && host.saved.isEmpty());
+        check("...but may switch the wall clock's page", post(port, "/api/command", null, "1357", "{\"view\":\"camera\"}").status == 200
+                && host.command.equals("{\"view\":\"camera\"}"));
+        check("a command reaches the app", post(port, "/api/command", null, "246810", "{\"view\":\"news\"}").status == 200
                 && host.command.equals("{\"view\":\"news\"}"));
-        check("a command without the PIN does not", post(port, "/api/command", "anna", "", "{\"view\":\"slides\"}").status == 401
+        check("a command without the PIN does not", post(port, "/api/command", null, "", "{\"view\":\"slides\"}").status == 401
                 && host.command.equals("{\"view\":\"news\"}"));
         check("the settings are saved only with the PIN", post(port, "/api/config", null, null, "{\"x\":1}").status == 401
-                && host.saved.isEmpty() && post(port, "/api/config", "anna", "246810", "{\"x\":1}").status == 200
+                && host.saved.isEmpty() && post(port, "/api/config", null, "246810", "{\"x\":1}").status == 200
                 && host.saved.equals("{\"x\":1}"));
-        check("the alarm list is handed on", get(port, "/api/events", "anna", "246810").text().contains("Driveway"));
-        check("the slide folders are handed on, with the PIN only", get(port, "/api/folders", "anna", "246810").text().equals("[\"night\"]")
+        check("the alarm list is handed on", get(port, "/api/events", null, "246810").text().contains("Driveway"));
+        check("the slide folders are handed on, with the PIN only", get(port, "/api/folders", null, "246810").text().equals("[\"night\"]")
                 && get(port, "/api/folders", null, null).status == 401);
         String file = "1791654912000_0_CrossLineDetection%2BCrossRegionDetection_0A1B2C3D4E5F.jpg";
-        Reply picture = get(port, "/api/shot?size=thumb&file=" + file, "anna", "246810");
+        Reply picture = get(port, "/api/shot?size=thumb&file=" + file, null, "246810");
         check("a picture comes as a JPEG", picture.status == 200 && picture.type.startsWith("image/jpeg")
                 && Arrays.equals(picture.body, PICTURE)
                 && host.asked.equals("1791654912000_0_CrossLineDetection+CrossRegionDetection_0A1B2C3D4E5F.jpg small"));
         check("a picture needs the PIN too", get(port, "/api/shot?size=thumb&file=" + file, null, null).status == 401);
         host.asked = "";
         check("only the tablet's alarm pictures can be asked for",
-                get(port, "/api/shot?size=thumb&file=..%2F..%2Fshared_prefs%2Fkiosk.xml", "anna", "246810").status == 404
-                && get(port, "/api/shot?size=thumb&file=%2Fetc%2Fpasswd.jpg", "anna", "246810").status == 404
-                && get(port, "/api/shot?size=thumb&file=small%2F" + file, "anna", "246810").status == 404
-                && get(port, "/api/shot?size=huge&file=" + file, "anna", "246810").status == 404
+                get(port, "/api/shot?size=thumb&file=..%2F..%2Fshared_prefs%2Fkiosk.xml", null, "246810").status == 404
+                && get(port, "/api/shot?size=thumb&file=%2Fetc%2Fpasswd.jpg", null, "246810").status == 404
+                && get(port, "/api/shot?size=thumb&file=small%2F" + file, null, "246810").status == 404
+                && get(port, "/api/shot?size=huge&file=" + file, null, "246810").status == 404
                 && host.asked.isEmpty());
-        check("an unknown API address: 404", get(port, "/api/secrets", "anna", "246810").status == 404);
+        String clip = "1791654912000_0_65_0A1B2C3D4E5F.mp4";
+        host.asked = "";
+        check("a video needs the PIN: to be fetched, and to be had", get(port, "/api/clip/get?file=" + clip, null, null).status == 401
+                && get(port, "/api/clip?file=" + clip, null, null).status == 401 && host.asked.isEmpty());
+        check("a video is fetched when asked for", get(port, "/api/clip/get?file=" + clip, null, "246810").text().equals("{\"done\":true}")
+                && host.asked.equals(clip + " wanted"));
+        Reply film = get(port, "/api/clip?file=" + clip, null, "246810");
+        check("the video comes whole, as MP4", film.status == 200 && film.type.startsWith("video/mp4")
+                && Arrays.equals(film.body, VIDEO) && host.asked.equals(clip + " sent"));
+        host.asked = "";
+        check("only an alarm's video can be asked for",
+                get(port, "/api/clip?file=..%2F..%2Fshared_prefs%2Fkiosk.xml", null, "246810").status == 404
+                && get(port, "/api/clip?file=%2Fsdcard%2Fmovie.mp4", null, "246810").status == 404
+                && get(port, "/api/clip?file=video%2F" + clip, null, "246810").status == 404
+                && get(port, "/api/clip/get?file=..%2F" + clip, null, "246810").text().contains("failed")
+                && host.asked.isEmpty());
+        check("an unknown API address: 404", get(port, "/api/secrets", null, "246810").status == 404);
 
-        for (int i = 0; i < 5; i++) get(port, "/api/state", "anna", "000000");
-        check("five wrong PINs lock even the right one out (429)", get(port, "/api/state", "anna", "246810").status == 429);
+        for (int i = 0; i < 5; i++) get(port, "/api/state", null, "000000");
+        check("five wrong PINs lock even the right one out (429)", get(port, "/api/state", null, "246810").status == 429);
 
         Remote second = new Remote(port, host);   // while the first still has the port
         second.setDaemon(true);
@@ -183,8 +227,64 @@ public final class RemoteTest {
         off.setDaemon(true);
         off.start();
         Thread.sleep(300);
-        check("nobody on the list: the remote control is off (403)", get(other, "/api/state", "anna", "246810").status == 403);
+        check("nobody on the list: the remote control is off (403)", get(other, "/api/state", null, "246810").status == 403);
         off.close();
+    }
+
+    private static String sessionOf(int port, String pin) throws IOException {
+        return new String(post(port, "/api/session", null, pin, "").body, StandardCharsets.UTF_8)
+                .replaceAll(".*\"session\":\"([^\"]+)\".*", "$1");
+    }
+
+    private static void sessions() throws Exception {
+        FakeHost host = new FakeHost();
+        host.access.users.put("246810", new Remote.User("Anna", true));
+        host.access.users.put("1357", new Remote.User("Иван", false));
+        long[] now = {1_800_000_000_000L};
+        int port = freePort();
+        Remote remote = new Remote(port, host);
+        remote.clock = () -> now[0];
+        remote.setDaemon(true);
+        remote.start();
+        Thread.sleep(300);
+        long hour = 3600000L;
+
+        check("a wrong PIN gets no session", post(port, "/api/session", null, "000000", "").status == 401);
+        check("a session cannot be had with a session", call(port, "/api/session", null, null, "", "anything").status == 401);
+        Reply signed = post(port, "/api/session", null, "246810", "");
+        check("signing in says who it is and what they may", signed.text().contains("\"user\":\"Anna\",\"settings\":true"));
+        String session = sessionOf(port, "246810");
+        Reply state = call(port, "/api/state", null, null, null, session);
+        check("signed in, the session alone opens the API", state.status == 200 && state.text().startsWith("{\"user\":\"Anna\""));
+        String ivan = sessionOf(port, "1357");
+        check("a session keeps its user's rights", call(port, "/api/state", null, null, null, ivan).text().startsWith("{\"user\":\"Иван\",\"settings\":false")
+                && call(port, "/api/config", null, null, null, ivan).status == 403 && call(port, "/api/config", null, null, null, session).status == 200);
+        check("a forged session is refused", call(port, "/api/state", null, null, null, session.substring(0, session.length() - 2) + "00").status == 401
+                && call(port, "/api/state", null, null, null, (now[0] - 1) + ":" + session.split(":")[1]).status == 401
+                && call(port, "/api/state", null, null, null, "Anna:" + session).status == 401);
+        now[0] += 7 * hour;
+        check("used within eight hours, it goes on", call(port, "/api/state", null, null, null, session).status == 200);
+        now[0] += 8 * hour + 1;
+        check("eight hours unused, it has ended", call(port, "/api/state", null, null, null, session).status == 401);
+        now[0] = 1_800_000_000_000L;
+        String daily = sessionOf(port, "246810");
+        boolean kept = true;
+        for (int i = 0; i < 3; i++) {
+            now[0] += 7 * hour;
+            kept &= call(port, "/api/state", null, null, null, daily).status == 200;
+        }
+        now[0] += 3 * hour + 1;
+        check("however much it is used, a session ends after 24 hours", kept && call(port, "/api/state", null, null, null, daily).status == 401);
+        String other = sessionOf(port, "246810");
+        check("signing out ends the session", call(port, "/api/session/end", null, null, "", other).status == 200
+                && call(port, "/api/state", null, null, null, other).status == 401);
+        String before = sessionOf(port, "246810");
+        host.access.users.remove("246810");
+        host.access.users.put("999999", new Remote.User("Anna", true));
+        check("a new PIN ends the user's sessions", call(port, "/api/state", null, null, null, before).status == 401);
+        host.access.users.clear();
+        check("with nobody listed, no session works (403)", call(port, "/api/state", null, null, null, ivan).status == 403);
+        remote.close();
     }
 
     private static void check(String what, boolean ok) {
@@ -211,11 +311,16 @@ public final class RemoteTest {
     }
 
     private static Reply call(int port, String path, String user, String pin, String body) throws IOException {
+        return call(port, path, user, pin, body, null);
+    }
+
+    private static Reply call(int port, String path, String user, String pin, String body, String session) throws IOException {
         HttpURLConnection link = (HttpURLConnection) new URL("http://127.0.0.1:" + port + path).openConnection();
         link.setConnectTimeout(3000);
         link.setReadTimeout(5000);
         if (user != null) link.setRequestProperty("X-User", URLEncoder.encode(user, "UTF-8"));
         if (pin != null) link.setRequestProperty("X-Pin", pin);
+        if (session != null) link.setRequestProperty("X-Session", session);
         if (body != null) {
             link.setDoOutput(true);
             link.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));

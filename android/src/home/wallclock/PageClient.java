@@ -196,8 +196,8 @@ final class PageClient extends WebViewClient {
     }
 
     /**
-     * For the newspaper page: market data (Yahoo), headlines (Google News), the
-     * Orthodox calendar (azbyka.ru) and the jokes of the day (anekdot.ru). Only
+     * For the newspaper page: market data (Yahoo), headlines (Google News) and the
+     * Orthodox calendar (azbyka.ru). Only
      * these addresses, built here from checked parts: the page cannot make the
      * app fetch anything else.
      */
@@ -223,9 +223,6 @@ final class PageClient extends WebViewClient {
             if (date == null || !date.matches("\\d{4}-\\d{2}-\\d{2}")) return failure(400, "Bad Request");
             address = "https://azbyka.ru/days/api/day/" + date + ".json";
             type = "application/json";
-        } else if ("/feed/jokes".equals(url.getPath())) {
-            address = "https://www.anekdot.ru/rss/export_j.xml";
-            type = "text/xml";
         } else {
             return failure(404, "Not Found");
         }

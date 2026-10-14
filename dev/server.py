@@ -14,7 +14,7 @@ http://localhost:8080/remote shows the remote-control page, with this script
 standing in for the tablet: it keeps the settings, pretends to change view and
 to ring when told to (a ring lasts a few seconds). The list of camera alarms,
 which the app copies from the cameras' SD cards, is made up here, for the kiosk
-page as well. Sign in as "dev" with the PIN 1234.
+page as well. Sign in with the PIN 1234.
 """
 
 import asyncio
@@ -101,12 +101,35 @@ async def remote_settings(request: web.Request) -> web.Response:
     return web.Response(text=page.replace("<body>", '<body class="remote" data-home="/remote">'), content_type="text/html")
 
 
+_SESSIONS = {}   # the pretend tablet's sessions: when each was made
+
+
 def _signed_in(request: web.Request) -> None:
-    """The pretend tablet knows one user. (The real rules are in Remote.java; see tools/test_remote.py.)"""
+    """The pretend tablet knows one user, "dev", by the PIN 1234, and gives sessions that end after a day.
+    (The real rules are in Remote.java; see tools/test_remote.py.)"""
+    session = request.headers.get("X-Session", "")
+    if session:
+        if time.time() - _SESSIONS.get(session, 0) > 24 * 3600:
+            raise web.HTTPUnauthorized()
+        return
     if not request.headers.get("X-Pin"):
         raise web.HTTPUnauthorized()
-    if (request.headers.get("X-User", "").lower(), request.headers["X-Pin"]) != ("dev", "1234"):
+    if request.headers["X-Pin"] != "1234":
         raise web.HTTPUnauthorized()
+
+
+async def remote_session(request: web.Request) -> web.Response:
+    if request.headers.get("X-Session"):
+        raise web.HTTPUnauthorized()
+    _signed_in(request)
+    session = f"dev:{int(time.time() * 1000)}:{os.urandom(8).hex()}"
+    _SESSIONS[session] = time.time()
+    return web.json_response({"session": session, "until": int((time.time() + 24 * 3600) * 1000), "user": "dev", "settings": True})
+
+
+async def remote_session_end(request: web.Request) -> web.Response:
+    _SESSIONS.pop(request.headers.get("X-Session", ""), None)
+    return web.json_response({})
 
 
 async def remote_config(request: web.Request) -> web.Response:
@@ -133,7 +156,7 @@ async def remote_save(request: web.Request) -> web.Response:
 async def remote_state(request: web.Request) -> web.Response:
     _signed_in(request)
     dev, now = request.app["dev"], time.time()
-    return web.json_response({"user": request.headers.get("X-User", ""), "tablet": {
+    return web.json_response({"user": "dev", "settings": True, "tablet": {
         "view": dev.view, "night": False, "ringing": now < dev.rings_until, "snoozed": now < dev.snoozed_until,
         "alarm": now < dev.alarm_until, "alarmText": "Driveway \u00b7 Test alarm \u00b7 12:00:00", "offline": ["Rear"],
         "weather": "\u26c5 12\u00b0 Partly cloudy \u2191 14\u00b0  \u2193 6\u00b0", "lux": 120, "locale": "en-CA", "build": "dev server"}})
@@ -241,6 +264,16 @@ async def remote_shot(request: web.Request) -> web.Response:
     return _made_up_shot(request)
 
 
+async def remote_clip_state(request: web.Request) -> web.Response:
+    _signed_in(request)
+    return await clip_state(request)
+
+
+async def remote_clip(request: web.Request) -> web.StreamResponse:
+    _signed_in(request)
+    return await clip(request)
+
+
 async def get_config(request: web.Request) -> web.Response:
     dev = request.app["dev"]
     # First run: only the login, so video and alarms work without typing it in.
@@ -319,10 +352,6 @@ async def feed_church(request: web.Request) -> web.Response:
     return await _relay(f"https://azbyka.ru/days/api/day/{date}.json", "application/json")
 
 
-async def feed_jokes(request: web.Request) -> web.Response:
-    return await _relay("https://www.anekdot.ru/rss/export_j.xml", "text/xml")
-
-
 async def events(request: web.Request) -> web.StreamResponse:
     dev = request.app["dev"]
     response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-store"})
@@ -392,9 +421,13 @@ def main() -> None:
     app.router.add_get("/settings", remote_settings)
     app.router.add_get("/api/events", remote_events)
     app.router.add_get("/api/shot", remote_shot)
+    app.router.add_get("/api/clip/get", remote_clip_state)
+    app.router.add_get("/api/clip", remote_clip)
     app.router.add_get("/api/config", remote_config)
     app.router.add_post("/api/config", remote_save)
     app.router.add_get("/api/state", remote_state)
+    app.router.add_post("/api/session", remote_session)
+    app.router.add_post("/api/session/end", remote_session_end)
     app.router.add_get("/api/media", media)
     app.router.add_get("/api/folders", slide_folders)
     app.router.add_post("/api/command", remote_command)
@@ -415,7 +448,6 @@ def main() -> None:
     app.router.add_get("/feed/yahoo", feed_yahoo)
     app.router.add_get("/feed/news", feed_news)
     app.router.add_get("/feed/church", feed_church)
-    app.router.add_get("/feed/jokes", feed_jokes)
     app.router.add_static("/media/", MEDIA_DIR)
     app.router.add_static("/", WEB_DIR)
     logger.info("Page with stand-in native side on http://localhost:%d", PORT)

@@ -38,7 +38,9 @@
     news: {   // what the News page shows
       cards: { usdcad: true, btc: true, rate: true, fuel: true, oil: true, indexes: true, air: true },
       holiday: true, picture: true, past: true, headlines: true,
-      names: false, church: false, past_ru: false, joke: false,   // the Russian picks
+      names: false, church: false, past_ru: false,   // the Russian picks
+      card_order: ["usdcad", "btc", "rate", "fuel", "oil", "indexes", "air"],     // the prices and charts, top to bottom
+      order: ["picture", "past", "headlines", "names", "church", "past_ru"],     // the reading blocks, top to bottom
     },
     restart_at: "04:00",                          // the app starts afresh every night; "" = never
     day: { brightness: -1, color: "#ffffff" },   // brightness: as for the night
@@ -47,7 +49,11 @@
       in_use: 1,                               // while the screen is being used
       on_alarm: 1,                             // during an alarm; -1 = as it was
     },
-    views: { camera_timeout_minutes: 10, weather_timeout_minutes: 0, buttons_hide_seconds: 6 },
+    views: {
+      buttons_hide_seconds: 6,
+      // untouched this long, a page gives way to the clock again; 0 = it stays
+      back: { camera: 300, events: 300, weather: 300, news: 300, slides: 0 },
+    },
     alarm: {
       min_total_seconds: 60, min_picture_seconds: 10, max_pictures: 12,
       around_seconds: 10,   // the camera's other pictures (of motion, say) are kept from this long before an alarm to this long after
@@ -67,9 +73,12 @@
     camera_user: "",
     camera_password: "",
     remote_pin: "",   // from before the remote control had users: it becomes the first one's PIN
-    remote: {         // who may use the remote control: networks, and users by name and PIN (none = it is off); and its TCP port
+    remote: {         // who may use the remote control, and the PINs; all of it is changed on the tablet only
       lan: true, also: "", port: 8080,
-      users: [0, 1, 2, 3, 4].map(() => ({ name: "", pin: "" })),
+      master: "",              // 8 digits or more: opens the Remote tab, and the settings when they are locked
+      lock_settings: false,    // the settings need a PIN: the master's, or that of a user allowed them
+      // a user is known by the PIN alone (none listed = the remote control is off); the name is for showing
+      users: [0, 1, 2, 3, 4].map(() => ({ name: "", pin: "", settings: false })),
     },
     cameras: [
       { name: "Camera 1", host: "", stream: 0 },
@@ -146,14 +155,12 @@
     return api("/api/command", JSON.stringify(what));
   }
 
-  // Remote side: every request carries the user's name and PIN, kept in this
-  // browser by the remote-control page (remote.js), where signing in happens.
-  // When the tablet refuses them, this page gives way to that one, which says why.
+  // Remote side: every request carries the session the remote-control page
+  // (remote.js) got when its user signed in. When the tablet refuses it (it
+  // ends after a day, or eight hours unused), this page gives way to that one,
+  // which says why and signs in again.
   const HOME = document.body.dataset.home || "/";
-  const signedAs = () => ({
-    "X-User": encodeURIComponent(localStorage.getItem("kiosk-user") || "home"),
-    "X-Pin": localStorage.getItem("kiosk-pin") || "",
-  });
+  const signedAs = () => ({ "X-Session": localStorage.getItem("kiosk-session") || "" });
   let pinWorks = false;
   async function api(path, body) {
     const options = { headers: signedAs() };
@@ -358,7 +365,7 @@
   // minute: a screen set too dark to read can always be put right.
   function updateMode() {
     const rescued = Date.now() < rescueUntil;
-    const used = rescued || view === "settings" || !$("shot").hidden || !$("clip").hidden || !$("chart").hidden || Date.now() - lastTouch < DAY_PEEK_MS;
+    const used = rescued || view === "settings" || !$("pin").hidden || !$("shot").hidden || !$("clip").hidden || !$("chart").hidden || Date.now() - lastTouch < DAY_PEEK_MS;
     const alarmed = alarm.open || ringing;
     night = previewMode ? previewMode === "night" : isNight(new Date()) && !used;
     document.body.classList.toggle("night", night);
@@ -408,6 +415,13 @@
   let navTimer = null;
 
   function show(name) {
+    // The settings may be locked: then they open for the master PIN, or for the PIN of a user allowed them.
+    if (name === "settings" && view !== "settings" && settingsLocked() && !unlocked.settings) {
+      askPin("PIN for the settings", (pin) => pin === cfg.remote.master || cfg.remote.users.some((user) => user.settings && user.pin === pin),
+        (pin) => { unlocked.settings = true; unlocked.master = pin === cfg.remote.master; show("settings"); });
+      return;
+    }
+    if (name !== "settings") unlocked.settings = unlocked.master = false;   // leaving them locks them again
     view = name;
     VIEWS.forEach((v) => { $("view-" + v).hidden = v !== name; });
     document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
@@ -420,16 +434,68 @@
     updateMode();
   }
 
+  // --- PINs on the tablet -----------------------------------------------------------
+  // The master PIN opens the Remote tab (users, PINs, the lock); when the
+  // settings are locked, they need a PIN as well. Both stay open until the
+  // settings are left. Five wrong PINs in a row: no more tries for a minute.
+  const unlocked = { settings: false, master: false };
+  const pinAsk = { check: null, done: null, wrong: 0, until: 0 };
+  const settingsLocked = () => !REMOTE && cfg.remote.lock_settings && !!cfg.remote.master;
+  const masterLocked = () => !REMOTE && !!cfg.remote.master && !unlocked.master;
+
+  function askPin(title, check, done) {
+    Object.assign(pinAsk, { check: check, done: done });
+    $("pin-title").textContent = title;
+    $("pin-input").value = "";
+    $("pin-note").textContent = Date.now() < pinAsk.until ? "Too many wrong PINs. Wait a minute." : "";
+    $("pin").hidden = false;
+    $("pin-input").focus();
+    updateMode();
+  }
+
+  $("pin-form").addEventListener("submit", (submit) => {
+    submit.preventDefault();
+    const pin = $("pin-input").value.trim();
+    $("pin-input").value = "";
+    if (Date.now() < pinAsk.until) return;
+    if (pin && pinAsk.check(pin)) {
+      pinAsk.wrong = 0;
+      $("pin").hidden = true;
+      pinAsk.done(pin);
+      return;
+    }
+    if (++pinAsk.wrong >= 5) { pinAsk.wrong = 0; pinAsk.until = Date.now() + 60000; }
+    $("pin-note").textContent = Date.now() < pinAsk.until ? "Too many wrong PINs. Wait a minute." : "Wrong PIN";
+  });
+  $("pin-cancel").addEventListener("click", () => { $("pin").hidden = true; updateMode(); });
+
+  // What is wrong with the PINs as typed on the Remote tab, or "".
+  function pinTrouble(remote) {
+    if (remote.master && !/^\d{8,}$/.test(remote.master)) return "The master PIN must be 8 digits or more.";
+    if (remote.lock_settings && !remote.master) return "Set a master PIN before locking the settings: else nobody could open them.";
+    const seen = remote.master ? [remote.master] : [];
+    for (let i = 0; i < remote.users.length; i++) {
+      const pin = remote.users[i].pin;
+      if (!pin) continue;
+      if (!/^\d{4,}$/.test(pin)) return "User " + (i + 1) + ": a PIN must be 4 digits or more.";
+      if (seen.includes(pin)) return "User " + (i + 1) + ": each PIN must differ from the others and from the master PIN.";
+      seen.push(pin);
+    }
+    return "";
+  }
+
   function showNav() {
     $("nav").classList.add("show");
     clearTimeout(navTimer);
     navTimer = setTimeout(() => $("nav").classList.remove("show"), cfg.views.buttons_hide_seconds * 1000);
   }
 
+  // Each page goes back to the clock when it has not been touched for the time
+  // set for it (views.back, in seconds; 0 = never). The settings always do, after ten minutes.
   function checkIdle() {
-    if (REMOTE) return;
-    const minutes = { camera: cfg.views.camera_timeout_minutes, weather: cfg.views.weather_timeout_minutes, settings: 10, events: 10 }[view];
-    if (minutes && Date.now() - lastTouch > minutes * 60000) show("clock");
+    if (REMOTE || (!$("clip").hidden && !$("clip-video").paused)) return;   // a video being watched counts as being used
+    const seconds = view === "settings" ? 600 : (cfg.views.back || {})[view];
+    if (seconds > 0 && Date.now() - lastTouch > seconds * 1000) show("clock");
   }
 
   document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click",
@@ -873,6 +939,11 @@
   const PAPER_MS = 30 * 60000;         // prices that move all day, headlines, air
   const PAPER_SLOW_MS = 6 * 3600000;   // one value a day or less
   const PAPER_ASK_MS = 5 * 60000;      // how often an open page looks for what has gone stale
+  // What the News settings put in order: the groups of cards, and the reading blocks.
+  const CARD_GROUPS = [["usdcad", "USD / CAD"], ["btc", "Bitcoin"], ["rate", "Bank of Canada rate"], ["fuel", "Gas price (Quebec)"],
+    ["oil", "Oil: WTI and Brent"], ["indexes", "Stock indexes"], ["air", "Air quality and UV"]];
+  const READ_BLOCKS = [["picture", "Picture of the day"], ["past", "On this day"], ["headlines", "Headlines"],
+    ["names", "Именины (name days)"], ["church", "Православный календарь"], ["past_ru", "Этот день в истории"]];
   const CARDS = [   // key, name, decimals, what goes before and after the number
     { key: "usdcad", name: "USD / CAD", digits: 4, group: "usdcad" },   // group: its switch in the settings
     { key: "btc", name: "Bitcoin, CAD", digits: 0, group: "btc" },
@@ -1027,15 +1098,6 @@
     };
   }
 
-  async function loadJokes() {   // the day's ten from anekdot.ru, through the app; the long ones left out
-    const reply = await fetch("/feed/jokes");
-    if (!reply.ok) throw new Error(reply.status);
-    const feed = new DOMParser().parseFromString(await reply.text(), "text/xml");
-    const jokes = Array.from(feed.querySelectorAll("item description")).map((node) => node.textContent
-      .replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim());
-    return jokes.filter((joke) => joke && joke.length < 520);
-  }
-
   function loadPaper() {
     paperAsked = Date.now();
     const now = new Date(), lang = cfg.locale.slice(0, 2), town = cfg.weather.city;
@@ -1055,7 +1117,6 @@
       [show.headlines, () => fresh("local", PAPER_MS, () => loadNews(lang, country, town), lang + here)],
       [show.names || show.church, () => fresh("church", PAPER_SLOW_MS, () => loadChurch(now), today)],
       [show.past_ru, () => fresh("past_ru", PAPER_SLOW_MS, () => loadPast("ru", now), today)],
-      [show.joke, () => fresh("jokes", PAPER_SLOW_MS, loadJokes, today)],
     ].concat(CARDS.filter((card) => card.yahoo).map((card) => [cards[card.group], () => fresh(card.key, PAPER_MS, () => loadYahoo(card.key))]));
     wanted.forEach((piece) => { if (piece[0]) piece[1]().then(renderPaper); });   // each piece shows as it comes
   }
@@ -1099,6 +1160,8 @@
   function renderPaper() {
     if (view !== "news") return;
     const cards = $("paper-cards"), show = cfg.news;
+    const boxes = {};   // the cards by group, to be put up in the order chosen
+    const put = (group, box) => { (boxes[group] = boxes[group] || []).push(box); };
     cards.textContent = "";
     CARDS.filter((card) => show.cards[card.group]).forEach((card) => {
       const points = pointsOf(card), fuel = card.key === "fuel" ? kept("fuel") : null;
@@ -1116,7 +1179,7 @@
       }
       box.append(el("span", "card-name", card.name), el("span", "card-value", last == null ? "\u2014" : amount(card, last)), move, lineOf(points, card.step));
       if (points.length > 1) box.addEventListener("click", () => openChart(card));
-      cards.appendChild(box);
+      put(card.group, box);
     });
     const air = show.cards.air && kept("air");
     if (air && air.aqi != null) {
@@ -1124,8 +1187,9 @@
       const word = air.aqi <= 50 ? "good" : air.aqi <= 100 ? "moderate" : air.aqi <= 150 ? "poor" : "bad";
       box.append(el("span", "card-name", "Air quality"), el("span", "card-value", String(Math.round(air.aqi))),
         el("span", "card-move", word), el("span", "card-note", "UV index " + Math.round(air.uv)));
-      cards.appendChild(box);
+      put("air", box);
     }
+    ordered(show.card_order, CARD_GROUPS.map((group) => group[0])).forEach((group) => (boxes[group] || []).forEach((box) => cards.appendChild(box)));
 
     const holiday = show.holiday && kept("holiday");
     if (holiday && holiday.date) {
@@ -1159,40 +1223,43 @@
       });
     };
 
-    const picture = show.picture && kept("picture");
-    if (picture && picture.src) {
-      const box = block("Picture of the day", "paper-picture"), img = el("img");
-      img.alt = "";
-      img.src = picture.src;
-      img.addEventListener("click", () => openPicture(picture));
-      box.append(img, el("p", "", picture.text),
-        el("p", "paper-credit", [picture.by, picture.license, "Wikimedia Commons"].filter(Boolean).join(" \u00B7 ")));
-    }
-    if (show.past) listed("On this day", "paper-past", pastRows(kept("past") || []));
-    if (show.headlines) {
-      const local = (kept("local") || []).slice(0, 2), seen = new Set(local.map((story) => story[0]));
-      listed("Headlines", "paper-news", (kept("news") || []).filter((story) => !seen.has(story[0])).slice(0, 5 - local.length)
-        .concat(local).map((story) => {
-          const row = el("li");
-          row.append(story[0] + " ", el("i", "", story[1]));
-          return row;
-        }));
-    }
     const church = (show.names || show.church) && kept("church");
-    if (church && show.names && church.names.length) block("Именины", "paper-names").appendChild(el("p", "", church.names.join(", ")));
-    if (church && show.church) {
-      const box = block("Православный календарь", "paper-church");
-      church.feasts.forEach((feast) => box.appendChild(el("p", "paper-feast", feast)));
-      if (church.saints.length) box.appendChild(el("p", "", church.saints.join("; ")));
-      if (church.icons.length) box.appendChild(el("p", "", "Иконы Божией Матери: " + church.icons.join(", ")));
-      box.appendChild(el("p", "paper-credit", [church.week, church.fast ? "постный день" : "", "azbyka.ru"].filter(Boolean).join(" \u00B7 ")));
-    }
-    if (show.past_ru) listed("Этот день в истории", "paper-past", pastRows(kept("past_ru") || []));
-    const jokes = show.joke ? kept("jokes") || [] : [];
-    if (jokes.length) {
-      const box = block("Анекдот дня", "paper-joke");   // one of the day's, moving on every hour
-      box.append(el("p", "", jokes[Math.floor(Date.now() / 3600000) % jokes.length]), el("p", "paper-credit", "anekdot.ru"));
-    }
+    const blocks = {   // each reading block, put up in the order chosen (news.order)
+      picture: () => {
+        const picture = show.picture && kept("picture");
+        if (!picture || !picture.src) return;
+        const box = block("Picture of the day", "paper-picture"), img = el("img");
+        img.alt = "";
+        img.src = picture.src;
+        img.addEventListener("click", () => openPicture(picture));
+        box.append(img, el("p", "", picture.text),
+          el("p", "paper-credit", [picture.by, picture.license, "Wikimedia Commons"].filter(Boolean).join(" \u00B7 ")));
+      },
+      past: () => { if (show.past) listed("On this day", "paper-past", pastRows(kept("past") || [])); },
+      headlines: () => {
+        if (!show.headlines) return;
+        const local = (kept("local") || []).slice(0, 2), seen = new Set(local.map((story) => story[0]));
+        listed("Headlines", "paper-news", (kept("news") || []).filter((story) => !seen.has(story[0])).slice(0, 5 - local.length)
+          .concat(local).map((story) => {
+            const row = el("li");
+            row.append(story[0] + " ", el("i", "", story[1]));
+            return row;
+          }));
+      },
+      names: () => {
+        if (church && show.names && church.names.length) block("Именины", "paper-names").appendChild(el("p", "", church.names.join(", ")));
+      },
+      church: () => {
+        if (!church || !show.church) return;
+        const box = block("Православный календарь", "paper-church");
+        church.feasts.forEach((feast) => box.appendChild(el("p", "paper-feast", feast)));
+        if (church.saints.length) box.appendChild(el("p", "", church.saints.join("; ")));
+        if (church.icons.length) box.appendChild(el("p", "", "Иконы Божией Матери: " + church.icons.join(", ")));
+        box.appendChild(el("p", "paper-credit", [church.week, church.fast ? "постный день" : "", "azbyka.ru"].filter(Boolean).join(" \u00B7 ")));
+      },
+      past_ru: () => { if (show.past_ru) listed("Этот день в истории", "paper-past", pastRows(kept("past_ru") || [])); },
+    };
+    ordered(show.order, READ_BLOCKS.map((one) => one[0])).forEach((key) => blocks[key]());
 
     const money = cards.children.length > 0 || $("paper-foot").textContent !== "";
     $("paper-money").hidden = !money;
@@ -1854,11 +1921,12 @@
     Slideshow: "Pictures come from the slides folder on the PC: run sync-slides.bat, then tap Slides to load them. "
       + "Folders inside it go along and can be chosen here, one for the day and one for the night.",
     Remote: "The remote control is a page the tablet serves to a PC or phone on the networks allowed here. "
-      + "Whoever is listed signs in there with name and PIN; with nobody listed it is off. Away from home, come in "
-      + "through a VPN, and name its network here if its addresses are not the home ones. "
-      + "All of this can only be changed here, on the tablet.",
+      + "A user signs in there with their PIN alone; with nobody listed it is off. Only users who may open the "
+      + "settings get them there, or here when the settings are locked. Away from home, come in through a VPN, and "
+      + "name its network here if its addresses are not the home ones. All of this can only be changed here, "
+      + "on the tablet, with the master PIN. Forgotten it? Run reset-master.bat on the PC, with the cable in.",
     News: "Everything on the News page comes from free services on the internet. Only what is switched on here is "
-      + "fetched; if more is on than fits, the page scrolls.",
+      + "fetched; if more is on than fits, the page scrolls. \u25B2 and \u25BC move a block up or down.",
     "Alarm clock": "Music, videos and pictures come from the media folder on the PC: run sync-media.bat. "
       + "A YouTube link is played when given; a picture is shown while the sound rings. "
       + "Music or a video plays the given number of times, for at most the given seconds in all. "
@@ -1870,8 +1938,10 @@
   // heading that folds the fields of its group away and sums them up); extra:
   // { button: [label, action] } puts a button beside the field, { group: n }
   // puts the field in a group, { describe } gives a heading its summary,
-  // { wide: true } gives the field a row of its own.
+  // { wide: true } gives the field a row of its own. Kind "order" is a list
+  // to put in order, { items: [[key, label, path of its on/off switch]] }.
   const percent = { show: (v) => (v < 0 ? "" : Math.round(v * 100)), read: (s) => (s === "" ? -1 : Math.min(100, Math.max(0, +s)) / 100) };
+  const list = { show: (v) => JSON.stringify(v), read: (s) => JSON.parse(s || "[]") };   // an "order" field's keys
   const number = { show: (v) => v, read: (s) => Math.max(0, +s || 0) };
   // A TCP port an app may open; anything else is the usual one.
   const port = { show: (v) => v, read: (s) => (s >= 1024 && s <= 65535 ? Math.round(+s) : DEFAULTS.remote.port) };
@@ -1894,8 +1964,6 @@
       ["backlight.on_alarm", "Backlight on an alarm, % (empty = as it was)", "number", percent],
       ["night.color", "Night colour", "color"],
       ["day.color", "Day colour", "color"],
-      ["views.camera_timeout_minutes", "Camera view back to clock after, min (0 = never)", "number", number],
-      ["views.weather_timeout_minutes", "Weather view back to clock after, min (0 = never)", "number", number],
       ["restart_at", "Restart the app every night at (empty = never)", "time"],
     ]],
     ["Weather", [
@@ -1903,6 +1971,7 @@
       ["weather.country_code", "Country code", "text"],
       ["weather.units", "Units", [["metric", "\u00B0C, km/h"], ["imperial", "\u00B0F, mph"]]],
       ["weather.refresh_minutes", "Refresh every, min", "number", number],
+      ["views.back.weather", "Back to the clock after, s (0 or empty = never)", "number", number],
     ]],
     ["Cameras", [
       ["camera_user", "Camera login", "text"],
@@ -1920,6 +1989,8 @@
       ["alarm.sound", "Sound on a camera alarm", [["none", "None"], ["beep", "Short beep"]].concat(SOUND_NAMES)],
       ["alarm.sound_seconds", "\u2026plays for, s", "number", number],
       ["alarm.volume", "\u2026volume, % of the loudest (empty = as the tablet is set)", "number", percent],
+      ["views.back.camera", "Camera page: back to the clock after, s (0 or empty = never)", "number", number],
+      ["views.back.events", "Events page: back to the clock after, s (0 or empty = never)", "number", number],
     ]],
     ["Slideshow", [
       ["slides.folder_day", "Pictures by day, from", "folder"],
@@ -1934,32 +2005,27 @@
       ["slides.clock", "Show the time", "checkbox"],
       ["slides.auto_start", "Start by itself at (empty = off)", "time"],
       ["slides.auto_stop", "Back to the clock at", "time"],
+      ["views.back.slides", "Back to the clock when untouched for, s (0 or empty = never)", "number", number],
     ]],
     ["Remote", [
+      ["remote.master", "Master PIN (8 digits or more; it opens this tab)", "password", null, { wide: true }],
+      ["remote.lock_settings", "The settings need a PIN: the master PIN, or that of a user below who may open them", "checkbox", null, { wide: true }],
       ["remote.lan", "Allow from the home network (the tablet's own /24)", "checkbox"],
       ["remote.port", "TCP port (1024 to 65535; empty = 8080)", "number", port],
-      ["remote.also", "Also allow from (a VPN's network, e.g. 10.8.0.0/24)", "text", null, { wide: true }],
+      ["remote.also", "Also allow from (a VPN's network, e.g. 10.8.0.0/24)", "text"],
     ].concat([0, 1, 2, 3, 4].reduce((rows, i) => rows.concat([
-      ["remote.users." + i + ".name", "User " + (i + 1), "text"],
-      ["remote.users." + i + ".pin", "PIN", "password"],
-    ]), []))],
+      ["remote.users." + i + ".name", "User " + (i + 1) + ": name, to show", "text"],
+      ["remote.users." + i + ".pin", "PIN (4 digits or more)", "password"],
+      ["remote.users." + i + ".settings", "May open the settings", "checkbox"],
+    ]), [])), "three"],
     ["News", [
-      ["news.cards.usdcad", "USD / CAD", "checkbox"],
-      ["news.cards.btc", "Bitcoin", "checkbox"],
-      ["news.cards.rate", "Bank of Canada rate", "checkbox"],
-      ["news.cards.fuel", "Gas price (Quebec)", "checkbox"],
-      ["news.cards.oil", "Oil: WTI and Brent", "checkbox"],
-      ["news.cards.indexes", "Stock indexes", "checkbox"],
-      ["news.cards.air", "Air quality and UV", "checkbox"],
-      ["news.holiday", "Next public holiday", "checkbox"],
-      ["news.picture", "Picture of the day", "checkbox"],
-      ["news.past", "On this day", "checkbox"],
-      ["news.headlines", "Headlines", "checkbox"],
-      ["news.names", "Именины (name days)", "checkbox"],
-      ["news.church", "Православный календарь", "checkbox"],
-      ["news.past_ru", "Этот день в истории", "checkbox"],
-      ["news.joke", "Анекдот дня", "checkbox"],
-    ], "three"],
+      ["news.card_order", "Prices and charts, top to bottom", "order", list,
+        { wide: true, items: CARD_GROUPS.map((group) => [group[0], group[1], "news.cards." + group[0]]) }],
+      ["news.order", "Reading, top to bottom", "order", list,
+        { wide: true, items: READ_BLOCKS.map((one) => [one[0], one[1], "news." + one[0]]) }],
+      ["news.holiday", "Next public holiday (under the prices)", "checkbox"],
+      ["views.back.news", "Back to the clock after, s (0 or empty = never)", "number", number],
+    ]],
     ["Alarm clock", [0, 1, 2, 3].reduce((rows, i) => rows.concat([
       ["", "Alarm " + (i + 1), "group", null, { describe: () => alarmSummary(i) }],
       ["clock_alarms." + i + ".on", "On", "checkbox", null, { button: ["Test", (button) => ringAsShown(i, button)] }],
@@ -2000,11 +2066,22 @@
     TABS.forEach((tab, index) => {
       const button = el("button", "", tab[0]);
       button.type = "button";
-      button.addEventListener("click", () => { settingsTab = index; showSettingsTab(); });
+      button.addEventListener("click", () => {
+        if (tab[0] === "Remote" && masterLocked()) {
+          askPin("Master PIN", (pin) => pin === cfg.remote.master, () => { unlocked.master = true; settingsTab = index; showSettingsTab(); });
+          return;
+        }
+        settingsTab = index;
+        showSettingsTab();
+      });
       tabs.appendChild(button);
       const box = el("fieldset", tab[2] || "");
       tab[1].forEach((field) => {
         const path = field[0], kind = field[2], convert = field[3], extra = field[4] || {};
+        if (kind === "order") {
+          box.appendChild(orderField(field, extra));
+          return;
+        }
         if (kind === "group") {
           const head = el("button", "field-group");
           head.type = "button";
@@ -2034,6 +2111,7 @@
           input = el("input");
           input.type = kind;
           input.autocomplete = "off";
+          if (/\.(pin|master)$/.test(path)) input.inputMode = "numeric";
           input.spellcheck = false;
         }
         if (kind === "checkbox") input.checked = !!value;
@@ -2060,6 +2138,41 @@
     showSettingsTab();
   }
 
+  // A list to put in order, each item with its own on/off switch: ▲ and ▼
+  // move an item. The order is kept in a hidden field, as the item keys.
+  function orderField(field, extra) {
+    const row = el("div", "field wide order"), keep = el("input"), items = el("div", "order-list");
+    keep.type = "hidden";
+    keep.dataset.path = field[0];
+    const note = () => { keep.value = JSON.stringify(Array.from(items.children).map((item) => item.dataset.key)); };
+    ordered(pathGet(cfg, field[0]), extra.items.map((item) => item[0])).forEach((key) => {
+      const item = extra.items.find((one) => one[0] === key), line = el("div", "order-item"), name = el("label", "order-name");
+      const check = el("input"), up = el("button", "order-move", "\u25B2"), down = el("button", "order-move", "\u25BC");
+      line.dataset.key = key;
+      check.type = "checkbox";
+      check.dataset.path = item[2];
+      check.checked = !!pathGet(cfg, item[2]);
+      name.append(check, el("b", "", item[1]));
+      up.type = down.type = "button";
+      up.setAttribute("aria-label", "Up");
+      down.setAttribute("aria-label", "Down");
+      up.addEventListener("click", () => { if (line.previousElementSibling) items.insertBefore(line, line.previousElementSibling); note(); });
+      down.addEventListener("click", () => { if (line.nextElementSibling) items.insertBefore(line.nextElementSibling, line); note(); });
+      line.append(name, up, down);
+      items.appendChild(line);
+    });
+    note();
+    row.append(el("span", "", field[1]), keep, items);
+    return row;
+  }
+
+  // The keys of `all` in the order given: those given first (unknown ones left
+  // out), then the rest in their own order, so a new block always shows up somewhere.
+  function ordered(given, all) {
+    const first = (Array.isArray(given) ? given : []).filter((key, i, keys) => all.includes(key) && keys.indexOf(key) === i);
+    return first.concat(all.filter((key) => !first.includes(key)));
+  }
+
   // One group of fields is unfolded at a time; every heading sums its group up.
   function showGroups(box) {
     box.querySelectorAll(".field-group").forEach((head) => {
@@ -2078,13 +2191,15 @@
   }
 
   function showSettingsTab() {
+    if (TABS[settingsTab][0] === "Remote" && masterLocked()) settingsTab = 0;   // opened before, under the master PIN
+    $("settings-hint").classList.remove("bad");
     Array.from($("settings-tabs").children).forEach((b, i) => b.classList.toggle("active", i === settingsTab));
     Array.from($("settings-form").children).forEach((box, i) => { box.hidden = i !== settingsTab; });
     $("settings-hint").textContent = HINTS[TABS[settingsTab][0]] || "";
     $("settings-test").hidden = TABS[settingsTab][0] !== "Cameras";
     const address = native.remoteAddress ? native.remoteAddress() : "";
     $("settings-remote").textContent = !address ? ""
-      : !cfg.remote.users.some((user) => user.name && user.pin) ? "Remote control is off. List a user on the Remote tab to use it from a PC or phone."
+      : !cfg.remote.users.some((user) => user.pin) ? "Remote control is off. List a user on the Remote tab to use it from a PC or phone."
       : native.remotePortBusy() ? "Remote control: port " + cfg.remote.port + " is taken on this tablet. Choose another on the Remote tab."
       : "Remote control from a PC or phone on this Wi-Fi: " + address;
     if (BUILD) $("settings-build").textContent = "App built " + BUILD;
@@ -2099,10 +2214,19 @@
   async function saveSettings() {
     const next = JSON.parse(JSON.stringify(cfg));
     $("settings-form").querySelectorAll("[data-path]").forEach((input) => {
-      const field = FIELDS.find((f) => f[0] === input.dataset.path);
+      // An item's switch inside an "order" field is no field of its own.
+      const field = FIELDS.find((f) => f[0] === input.dataset.path) || [input.dataset.path, "", input.type];
       const text = input.value.trim();
       pathSet(next, field[0], field[2] === "checkbox" ? input.checked : field[3] ? field[3].read(text) : text);
     });
+    const trouble = REMOTE ? "" : pinTrouble(next.remote);
+    if (trouble) {   // nothing is saved: the Remote tab says what to put right
+      settingsTab = TABS.findIndex((tab) => tab[0] === "Remote");
+      showSettingsTab();
+      $("settings-hint").textContent = trouble;
+      $("settings-hint").classList.add("bad");
+      return;
+    }
     await native.saveConfig(JSON.stringify(next));
     location.reload();
   }
@@ -2260,6 +2384,9 @@
         cfg = merge(BASE, saved);
         // Saved before "day again" was a setting of its own: it was twice the dark limit.
         if (!saved.night || saved.night.light_lux == null) cfg.night.light_lux = cfg.night.dark_lux * 2;
+        // Saved when only two pages went back to the clock, after minutes: now every page has its own time, in seconds.
+        delete cfg.views.camera_timeout_minutes;
+        delete cfg.views.weather_timeout_minutes;
         // Saved when following the room was a switch for the day only: its range now serves day and night.
         const was = saved.day && saved.day.auto;
         if (was && !saved.backlight) {
@@ -2273,8 +2400,12 @@
     if (typeof cfg.alarm.sound === "boolean") cfg.alarm.sound = cfg.alarm.sound ? "beep" : "none";   // it was a switch once
     // The remote control's list of users: always five rows, and the single PIN
     // of earlier settings becomes the first user's, under the name "home".
-    cfg.remote.users = [0, 1, 2, 3, 4].map((i) => Object.assign({ name: "", pin: "" }, cfg.remote.users[i]));
-    if (cfg.remote_pin && !cfg.remote.users.some((user) => user.name)) cfg.remote.users[0] = { name: "home", pin: cfg.remote_pin };
+    // Saved before the right to the settings was a choice: everybody with a PIN had it.
+    cfg.remote.users = [0, 1, 2, 3, 4].map((i) => {
+      const was = cfg.remote.users[i] || {};
+      return Object.assign({ name: "", pin: "", settings: !!was.pin }, was);
+    });
+    if (cfg.remote_pin && !cfg.remote.users.some((user) => user.pin)) cfg.remote.users[0] = { name: "home", pin: cfg.remote_pin, settings: true };
     cfg.remote_pin = "";
     // Alarms saved before each had its own sound, media and timings get them now.
     cfg.clock_alarms = cfg.clock_alarms.map((a) => Object.assign({

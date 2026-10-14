@@ -326,7 +326,6 @@ body.night .seg.on.rest { opacity: 0.3; }
 .paper-picture img { display: block; width: 100%; max-height: 30vh; margin-bottom: 1vh; object-fit: contain; background: #000; }
 .paper-picture p:not(.paper-credit) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .paper-feast { font-weight: 700; }
-.paper-joke p:not(.paper-credit) { white-space: pre-line; }
 .paper-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(11.8vw, 1fr)); gap: 1vh 1vw; }
 .card {
   display: grid;
@@ -505,6 +504,9 @@ body.remote .field input, body.remote .field select { font-size: 1rem; border-ra
 body.remote .field input[type=color] { height: 2.5rem; padding: 0.2rem; }
 body.remote .field.check { gap: 0.6rem; font-size: 1rem; }
 body.remote .field.check input { width: 1.3rem; height: 1.3rem; padding: 0; }
+body.remote .order-name { font-size: 1rem; gap: 0.6rem; }
+body.remote .field .order-name input { width: 1.3rem; height: 1.3rem; }
+body.remote .order-move { font-size: 0.85rem; padding: 0.4rem 0.8rem; border-radius: 0.35rem; cursor: pointer; }
 body.remote .settings fieldset.three .field.check { padding-bottom: 0.45rem; }
 body.remote .field .field-action { font-size: 0.75rem; padding: 0.35rem 0.9rem; }
 body.remote .field-group { gap: 1rem; font-size: 1rem; padding: 0.9rem 0 0.3rem; }
@@ -578,8 +580,28 @@ body.remote .settings-actions { flex-wrap: wrap; }
 .settings fieldset.three .field.check { align-self: end; padding-bottom: 1vh; }   /* level with the inputs beside it */
 .field.check { flex-direction: row; justify-content: flex-start; align-items: center; gap: 1.4vw; font-size: 2.8vh; }
 .field.check input { order: -1; width: 4.4vh; height: 4.4vh; padding: 0; accent-color: #fff; }
+/* a list to put in order (News): each item a switch, a name and its two arrows */
+.order-list { display: grid; }
+.order-item { display: flex; align-items: center; gap: 1.2vw; padding: 0.7vh 0; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+.order-name { flex: 1; display: flex; align-items: center; gap: 1.4vw; min-width: 0; font-size: 2.8vh; }
+.order-name b { font-weight: 400; }
+.field .order-name input { width: 4.4vh; height: 4.4vh; padding: 0; accent-color: #fff; }
+.order-move { font: inherit; font-size: 2.4vh; line-height: 1; color: #fff; background: #151515; border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 0.8vh; padding: 1vh 1.8vw; }
+.order-move:active { border-color: #fff; }
 .settings-hint { margin-top: 2vh; font-size: 2.4vh; opacity: 0.6; }
 .settings-hint[hidden] { display: none; }
+.settings-hint.bad { color: #ff7a7a; opacity: 1; }
+
+/* asking for a PIN on the tablet: over everything, never dimmed */
+.pin { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, 0.88); }
+.pin[hidden] { display: none; }
+.pin-box { display: grid; gap: 2.4vh; width: min(84vw, 62vh); padding: 4vh; background: #0b0b0b; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 2vh; }
+.pin-title { font-size: 2.8vh; letter-spacing: 0.18em; text-transform: uppercase; }
+#pin-input { font: inherit; font-size: 5vh; letter-spacing: 0.4em; text-align: center; color: #fff; background: #151515; border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 1vh; padding: 1.6vh; min-width: 0; }
+#pin-input:focus { outline: 0; border-color: #fff; }
+.pin-note { min-height: 3vh; font-size: 2.5vh; color: #ff7a7a; }
+.pin-keys { display: flex; justify-content: flex-end; gap: 2.4vw; }
+.pin-keys button { font: inherit; font-size: 2.6vh; letter-spacing: 0.18em; text-transform: uppercase; color: #fff; background: none; border: 0.2vh solid #fff; border-radius: 99vh; padding: 1.6vh 4vw; }
 .settings-hint:empty { display: none; }
 .settings-actions button[hidden] { display: none; }
 
@@ -712,6 +734,9 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .field input, .field select { font-size: 4.2vw; padding: 1vh 2vw; }
   .field.check { font-size: 3.6vw; }
   .field.check input { width: 6vw; height: 6vw; }
+  .order-name { font-size: 3.6vw; gap: 2.4vw; }
+  .field .order-name input { width: 6vw; height: 6vw; }
+  .order-move { font-size: 3.4vw; padding: 1vh 3.4vw; }
   .field .field-action { font-size: 2.6vw; padding: 0.8vh 2.6vw; }
   .settings-hint { font-size: 3vw; }
   .field-group { font-size: 3.6vw; gap: 3vw; }

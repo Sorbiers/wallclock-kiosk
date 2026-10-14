@@ -26,7 +26,6 @@
 
   <form class="signin" id="signin" hidden>
     <p id="signin-note"></p>
-    <input id="signin-user" placeholder="Name" autocomplete="username" autocapitalize="none" spellcheck="false">
     <input id="signin-pin" placeholder="PIN" type="password" autocomplete="current-password">
     <button type="submit" class="key key-blue">Sign in</button>
   </form>
@@ -76,6 +75,13 @@
   <button type="button" class="lightbox-step" id="lightbox-prev" aria-label="Previous picture">&#8249;</button>
   <button type="button" class="lightbox-step" id="lightbox-next" aria-label="Next picture">&#8250;</button>
   <button type="button" class="key" id="lightbox-close">Close</button>
+</div>
+
+<div class="lightbox" id="player" hidden>
+  <video id="player-video" controls playsinline></video>
+  <p class="player-note" id="player-note"></p>
+  <div class="lightbox-top"><span id="player-caption"></span></div>
+  <button type="button" class="key" id="player-close">Close</button>
 </div>
 
 <script src="remote.js"></script>

@@ -28,11 +28,11 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   Canada rate, oil and the main stock indexes (a tap enlarges one), pump prices
   in a Quebec town, air quality, the next public holiday, the picture of the
   day, this day in history and the headlines; optionally Russian picks: name
-  days, the Orthodox calendar, history and a joke of the day. The settings
-  choose what is shown. All from free services without a key: the Bank of
+  days, the Orthodox calendar and history. The settings choose what is shown
+  and in which order. All from free services without a key: the Bank of
   Canada, CoinGecko, Yahoo Finance (unofficial, so it may stop working),
   Quebec's Régie de l'énergie, Open-Meteo, Nager.Date, Wikipedia and Wikimedia
-  Commons, Google News, azbyka.ru and anekdot.ru.
+  Commons, Google News and azbyka.ru.
 - **Slides** — a slideshow of your own pictures, optionally on a daily schedule
   and with the clock page in between. Day and night can each have a folder of
   pictures of their own.
@@ -49,7 +49,8 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   alarm can too, and a double tap always gives full light for half a minute.
 - **Remote control** — a page served by the tablet itself (`http://<tablet>:8080`;
   the settings can name another port), made like a TV remote: what the wall clock is doing, keys to switch its page
-  and to stop an alarm, the list of camera alarms with their pictures, and a
+  and to stop an alarm, the list of camera alarms with their pictures and
+  videos, and a
   Settings key to every setting (which can also save the settings to a file
   and restore them; the camera password and the PINs never leave the tablet).
 - **Kiosk** — full screen, screen always on, landscape or portrait; can be the
@@ -65,8 +66,12 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
 - **Tablet: Android 11 or newer** with a current system WebView. Developed and
   tested on one device, a Lenovo Tab M9 (Android 13), with two Amcrest 5 MP
   cameras; there it plays both full-resolution streams at about 20 frames a second.
-- **The remote control needs a user**, with a name and a PIN, listed in the
-  tablet's settings; with nobody listed it is off. It answers only the tablet's
+- **The remote control needs a user** listed in the tablet's settings, known by
+  a PIN of their own (4 digits or more; the name is only shown); with nobody
+  listed it is off. A sign-in lasts a day, or until eight hours unused; the
+  browser keeps no PIN. Each user may or may not open the settings. A master
+  PIN (8 digits or more) guards the users and PINs, and can lock the settings
+  on the tablet as well; `reset-master.bat` forgets it, over the USB cable. It answers only the tablet's
   own /24 network and the networks you add there (a VPN's, say). It is plain
   HTTP, so do not forward its port from the Internet, and treat the PIN as a
   lock against other people in the house, not against a determined attacker.
@@ -94,7 +99,8 @@ script calls the SDK tools directly.
 | `sync-media.bat [folder]` | Copies what the alarm clock can play (default: `media\`): music, videos, pictures |
 | `wifi-on.bat` | Lets the scripts above reach the tablet over Wi-Fi, without the cable |
 | `test-alarm.bat [camera]` | Pretends a camera alarm on the tablet; pictures and live view are real |
-| `serve.bat [port]` | Shows the page in a desktop browser for development; `/remote` there is the remote-control page with a pretend tablet (sign in as `dev`, PIN `1234`) |
+| `reset-master.bat` | Forgets the tablet's master PIN (and the lock on its settings), for when it is forgotten |
+| `serve.bat [port]` | Shows the page in a desktop browser for development; `/remote` there is the remote-control page with a pretend tablet (PIN `1234`) |
 
 `deploy.bat` and the two sync scripts go by USB cable when the tablet is plugged in
 (USB debugging on). To do without the cable, run `wifi-on.bat` once with the

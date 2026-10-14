@@ -105,6 +105,34 @@ public class MainActivity extends Activity {
         web.loadUrl(view == null ? PAGE : PAGE + "?view=" + view);
 
         listen();
+        if (getIntent().getBooleanExtra("reset_master", false)) resetMaster();
+    }
+
+    /** Another start of the app while it runs: perhaps the reset of the master PIN (see resetMaster). */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent.getBooleanExtra("reset_master", false)) resetMaster();
+    }
+
+    /**
+     * Forgets the master PIN, and with it the lock on the settings: for when
+     * it is forgotten. Asked for from the PC over the USB cable
+     * (reset-master.bat, which only a PC allowed to debug the tablet can do).
+     */
+    private void resetMaster() {
+        try {
+            JSONObject config = new JSONObject(settings().getString("config", "{}"));
+            JSONObject remote = config.optJSONObject("remote");
+            if (remote != null) {
+                remote.put("master", "").put("lock_settings", false);
+                settings().edit().putString("config", config.toString()).commit();
+            }
+            Log.w("WallClock", "The master PIN was reset");
+        } catch (JSONException unreadable) {
+            // nothing to reset
+        }
+        runInPage("location.reload()");
     }
 
     @Override
@@ -258,11 +286,15 @@ public class MainActivity extends Activity {
                     JSONObject user = users.optJSONObject(i);
                     if (user == null) continue;
                     String name = user.optString("name").trim(), pin = user.optString("pin").trim();
-                    if (!name.isEmpty() && !pin.isEmpty()) access.users.put(name.toLowerCase(Locale.ROOT), pin);
+                    // Saved before the right to the settings was a choice: everybody had it.
+                    if (!pin.isEmpty()) access.users.put(pin, new Remote.User(name.isEmpty() ? "user " + (i + 1) : name, user.optBoolean("settings", true)));
                 }
                 // From before there were users: the one PIN, under the name "home".
                 String old = config.optString("remote_pin").trim();
-                if (access.users.isEmpty() && !old.isEmpty()) access.users.put("home", old);
+                if (access.users.isEmpty() && !old.isEmpty()) access.users.put(old, new Remote.User("home", true));
+                // The master PIN opens the remote control too, with everything.
+                String master = remote == null ? "" : remote.optString("master").trim();
+                if (!master.isEmpty() && !access.users.isEmpty()) access.users.put(master, new Remote.User("master", true));
             } catch (JSONException unreadable) {
                 // nobody gets in
             }
@@ -279,6 +311,8 @@ public class MainActivity extends Activity {
         public String config() {
             try {
                 JSONObject config = saved().put("camera_password", "").put("remote_pin", "");
+                JSONObject remote = config.optJSONObject("remote");
+                if (remote != null) remote.put("master", "");
                 JSONArray users = users(config);
                 for (int i = 0; i < users.length(); i++) {
                     JSONObject user = users.optJSONObject(i);
@@ -320,6 +354,31 @@ public class MainActivity extends Activity {
         @Override
         public byte[] shot(String file, boolean small) {
             return cameras.picture(file, small);
+        }
+
+        @Override
+        public String clipState(String file) {
+            return cameras.clipState(file);
+        }
+
+        @Override
+        public File clip(String file) {
+            return cameras.clip(file);
+        }
+
+        /** Made once, at random, and kept apart from the settings, which can be saved to a file and sent out. */
+        @Override
+        public synchronized String secret() {
+            String secret = settings().getString("remote_secret", "");
+            if (secret.isEmpty()) {
+                byte[] random = new byte[32];
+                new java.security.SecureRandom().nextBytes(random);
+                StringBuilder hex = new StringBuilder();
+                for (byte b : random) hex.append(String.format(Locale.ROOT, "%02x", b));
+                secret = hex.toString();
+                settings().edit().putString("remote_secret", secret).apply();
+            }
+            return secret;
         }
 
         @Override
