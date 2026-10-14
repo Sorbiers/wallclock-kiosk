@@ -159,7 +159,8 @@ async def remote_state(request: web.Request) -> web.Response:
     return web.json_response({"user": "dev", "settings": True, "tablet": {
         "view": dev.view, "night": False, "ringing": now < dev.rings_until, "snoozed": now < dev.snoozed_until,
         "alarm": now < dev.alarm_until, "alarmText": "Driveway \u00b7 Test alarm \u00b7 12:00:00", "offline": ["Rear"],
-        "weather": "\u26c5 12\u00b0 Partly cloudy \u2191 14\u00b0  \u2193 6\u00b0", "lux": 120, "locale": "en-CA", "build": "dev server"}})
+        "weather": "\u26c5 12\u00b0 Partly cloudy \u2191 14\u00b0  \u2193 6\u00b0", "lux": 120, "locale": "en-CA", "build": "dev server",
+        "printerOn": True, "printer": ""}})
 
 
 async def remote_command(request: web.Request) -> web.Response:
@@ -252,6 +253,50 @@ async def card_since(request: web.Request) -> web.Response:
     cam = request.match_info["cam"]
     return web.json_response([{"at": began + i * 1000, "file": f"{began + i * 1000}_{cam}_CrossLineDetection_{i:012X}.jpg"}
                               for i in range(count)])
+
+
+_PRINT_BEGAN = time.time()
+
+
+def _made_up_printer(request: web.Request) -> dict:
+    """A printer, made up: a print of 40 minutes, then 10 minutes' rest, over and over. None unless the settings name one."""
+    if not ((request.app["dev"].saved or {}).get("printer") or {}).get("host"):
+        return {"online": False, "configured": False}
+    t = (time.time() - _PRINT_BEGAN + 2280) % 3000   # starts two minutes before the end of a print
+    running, share = t < 2400, min(1.0, t / 2400)
+    return {"online": True, "configured": True, "at": int(time.time() * 1000), "gcode_state": "RUNNING" if running else "FINISH",
+            "mc_percent": int(share * 100), "mc_remaining_time": int((2400 - t) / 60) if running else 0,
+            "layer_num": int(share * 120), "total_layer_num": 120, "subtask_name": "holder_2.gcode.3mf",
+            "nozzle_temper": 219.6 if running else 34, "nozzle_target_temper": 220 if running else 0,
+            "bed_temper": 59.8 if running else 31, "bed_target_temper": 60 if running else 0, "spd_lvl": 2, "print_error": 0,
+            "hms": [], "wifi_signal": "-40dBm", "vt_tray": {"tray_type": "PLA", "tray_sub_brands": "PLA Basic", "tray_color": "F2F2F2FF"}}
+
+
+def _made_up_printer_picture() -> web.Response:
+    from PIL import Image, ImageDraw
+    picture = Image.new("RGB", (1536, 1080), (70, 64, 58))
+    ImageDraw.Draw(picture).text((60, 60), "printer camera (made up) " + time.strftime("%H:%M:%S"), fill="white")
+    jpeg = io.BytesIO()
+    picture.save(jpeg, "JPEG", quality=70)
+    return web.Response(body=jpeg.getvalue(), content_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+async def dev_printer(request: web.Request) -> web.Response:
+    return web.json_response(_made_up_printer(request))
+
+
+async def printer_camera(request: web.Request) -> web.Response:
+    return _made_up_printer_picture()
+
+
+async def remote_printer(request: web.Request) -> web.Response:
+    _signed_in(request)
+    return web.json_response(_made_up_printer(request))
+
+
+async def remote_printer_camera(request: web.Request) -> web.Response:
+    _signed_in(request)
+    return _made_up_printer_picture()
 
 
 async def remote_events(request: web.Request) -> web.Response:
@@ -420,6 +465,10 @@ def main() -> None:
     app.router.add_get("/remote", remote)
     app.router.add_get("/settings", remote_settings)
     app.router.add_get("/api/events", remote_events)
+    app.router.add_get("/api/printer", remote_printer)
+    app.router.add_get("/api/printer/camera", remote_printer_camera)
+    app.router.add_get("/dev/printer", dev_printer)
+    app.router.add_get("/printer/camera.jpg", printer_camera)
     app.router.add_get("/api/shot", remote_shot)
     app.router.add_get("/api/clip/get", remote_clip_state)
     app.router.add_get("/api/clip", remote_clip)

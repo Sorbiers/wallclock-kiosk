@@ -36,13 +36,15 @@ final class PageClient extends WebViewClient {
 
     private final AssetManager assets;
     private final Cameras cameras;
+    private final Printer printer;
     private final File slides;
     private final File media;
     private final Runnable pageDied;
 
-    PageClient(AssetManager assets, Cameras cameras, File slides, File media, Runnable pageDied) {
+    PageClient(AssetManager assets, Cameras cameras, Printer printer, File slides, File media, Runnable pageDied) {
         this.assets = assets;
         this.cameras = cameras;
+        this.printer = printer;
         this.slides = slides;
         this.media = media;
         this.pageDied = pageDied;
@@ -65,6 +67,12 @@ final class PageClient extends WebViewClient {
         if (path.startsWith("/slides/")) return slide(url.getPathSegments());
         if (path.startsWith("/media/")) return media(new File(path).getName(), header(request, "Range"));
         if (path.startsWith("/feed/")) return feed(url);
+        if (path.equals("/printer/camera.jpg")) {   // the printer camera's latest picture
+            byte[] picture = printer.picture();
+            return picture == null ? failure(404, "Not Found")
+                    : new WebResourceResponse("image/jpeg", null, 200, "OK", Collections.singletonMap("Cache-Control", "no-store"),
+                    new ByteArrayInputStream(picture));
+        }
         String file = path.equals("/") ? "index.html" : path.substring(1);
         try {
             return new WebResourceResponse(mimeType(file), "utf-8", assets.open(file));

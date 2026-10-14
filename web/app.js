@@ -15,7 +15,7 @@
   // Opened in another device's browser (served by the tablet, see Remote.java):
   // only the mode buttons and the settings, acting on the tablet.
   const REMOTE = document.body.classList.contains("remote");
-  const VIEWS = ["clock", "camera", "events", "weather", "news", "slides", "settings"];
+  const VIEWS = ["clock", "camera", "events", "weather", "news", "slides", "printer", "settings"];
   const DAY_PEEK_MS = 5000;   // a tap puts the screen "in use" for this long: day colours, the in-use backlight
   const RESCUE_MS = 30000;    // a double tap: full light and white on black for this long, whatever is set
   const DOUBLE_TAP_MS = 400;
@@ -52,13 +52,18 @@
     views: {
       buttons_hide_seconds: 6,
       // untouched this long, a page gives way to the clock again; 0 = it stays
-      back: { camera: 300, events: 300, weather: 300, news: 300, slides: 0 },
+      back: { camera: 300, events: 300, weather: 300, news: 300, slides: 0, printer: 300 },
     },
     alarm: {
       min_total_seconds: 60, min_picture_seconds: 10, max_pictures: 12,
       around_seconds: 10,   // the camera's other pictures (of motion, say) are kept from this long before an alarm to this long after
       codes: ["CrossLineDetection", "CrossRegionDetection"],
       sound: "beep", sound_seconds: 1, volume: -1,   // sound: "none", "beep" or one of SOUNDS; volume -1 = as the tablet is set
+    },
+    printer: {   // a Bambu Lab printer on the home network; no address = none
+      name: "Printer", host: "", code: "",       // code: the printer's LAN access code
+      notify: true,                              // a notice when a print finishes or fails...
+      sound: "chime", sound_seconds: 4, volume: -1,   // ...with this sound, as for a camera alarm
     },
     slides: {
       seconds: 8, transition: "random", motion: true, clock: true,
@@ -117,6 +122,7 @@
     setBrightness: (level) => window.Android.setBrightness(level),
     openSystemSettings: () => window.Android.openSystemSettings(),
     listSlides: async (folder) => JSON.parse(window.Android.listSlides(folder)),   // "" = the slides folder itself
+    printerState: async () => JSON.parse(window.Android.printerState()),           // and every report comes as kioskNative.printer
     listSlideFolders: async () => JSON.parse(window.Android.listSlideFolders()),  // the folders inside it
     listMedia: async () => JSON.parse(window.Android.listMedia()),
     remoteAddress: () => window.Android.remoteAddress(),
@@ -144,11 +150,12 @@
     },
     setBrightness: () => {},
     listSlides: (folder) => fetch("/dev/slides?folder=" + encodeURIComponent(folder)).then((r) => r.json()),
+    printerState: () => fetch("/dev/printer").then((r) => r.json()),   // asked again and again: no reports come by themselves here
     listSlideFolders: () => fetch("/dev/slide-folders").then((r) => r.json()),
     listMedia: () => fetch("/dev/media").then((r) => r.json()),
   };
   const BUILD = window.Android ? window.Android.build() : "";   // when the app was built, and from which commit
-  window.kioskNative = { event: onCameraEvent, status: onCameraStatus, back: () => show("clock"), remote: onRemote };
+  window.kioskNative = { event: onCameraEvent, status: onCameraStatus, back: () => show("clock"), remote: onRemote, printer: onPrinter };
 
   // The remote page sends commands; the tablet carries them out.
   function command(what) {
@@ -310,7 +317,7 @@
   }
 
   // --- clock, date, day / night ---------------------------------------------
-  const clocks = ["clock", "cam", "wx", "ss", "ev", "wake", "news"].map((name) => buildDigits($(name + "-digits")));
+  const clocks = ["clock", "cam", "wx", "ss", "ev", "wake", "news", "pr"].map((name) => buildDigits($(name + "-digits")));
   // Upright tablet: the main clock stacks; the small header clocks stay in a row.
   const upright = window.matchMedia("(orientation: portrait)");
   const arrangeClock = () => clocks[0].arrange(upright.matches);
@@ -366,7 +373,7 @@
   function updateMode() {
     const rescued = Date.now() < rescueUntil;
     const used = rescued || view === "settings" || !$("pin").hidden || !$("shot").hidden || !$("clip").hidden || !$("chart").hidden || Date.now() - lastTouch < DAY_PEEK_MS;
-    const alarmed = alarm.open || ringing;
+    const alarmed = alarm.open || ringing || !$("done").hidden;
     night = previewMode ? previewMode === "night" : isNight(new Date()) && !used;
     document.body.classList.toggle("night", night);
     document.body.classList.toggle("rescue", rescued);
@@ -406,7 +413,7 @@
     clocks.forEach((c) => c.set(hhmm));
     const weekday = new Intl.DateTimeFormat(cfg.locale, { weekday: "long" }).format(now);
     const date = new Intl.DateTimeFormat(cfg.locale, { day: "numeric", month: "long" }).format(now);
-    ["clock", "cam", "wx", "ev", "news"].forEach((name) => { $(name + "-date").textContent = weekday + " \u00B7 " + date; });
+    ["clock", "cam", "wx", "ev", "news", "pr"].forEach((name) => { $(name + "-date").textContent = weekday + " \u00B7 " + date; });
   }
 
   // --- views and their buttons --------------------------------------------
@@ -430,6 +437,7 @@
     if (name === "settings") fillSettings();
     if (name === "events") renderEvents(); else closeEvents();
     if (name === "news") { renderPaper(); loadPaper(); } else closeChart();
+    if (name === "printer") openPrinter(); else closePrinter();
     lastTouch = Date.now();
     updateMode();
   }
@@ -498,6 +506,23 @@
     if (seconds > 0 && Date.now() - lastTouch > seconds * 1000) show("clock");
   }
 
+  // Each page button has a word and an icon; upright, where the words do not fit, the icon shows instead (style.css).
+  const NAV_ICONS = {   // drawn on a 24 by 24 grid, in lines
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+    camera: '<rect x="2.5" y="6.5" width="13" height="11" rx="2"/><path d="M15.5 10.5l6-3.5v10l-6-3.5"/>',
+    events: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.8 1.8H4.2z"/><path d="M10 21h4"/>',
+    weather: '<path d="M7 19h10.5a4 4 0 0 0 .4-8 6 6 0 0 0-11.6 1.6A3.2 3.2 0 0 0 7 19z"/>',
+    news: '<path d="M4 5h13v14.5H6.2A2.2 2.2 0 0 1 4 17.3z"/><path d="M17 9h3v8.5a2 2 0 0 1-3 1.7"/><path d="M7.5 9h6M7.5 12.5h6M7.5 16h3.5"/>',
+    slides: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 16.5l5-5 4 4 3-3 5 5"/><circle cx="16" cy="9.5" r="1.4"/>',
+    printer: '<path d="M4 3.5v17M20 3.5v17M3 3.5h18M3 20.5h18"/><path d="M9.5 7h5v3.5l-2.5 2.5-2.5-2.5z"/><path d="M7.5 17h9"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',   // the cog after Feather Icons (MIT)
+  };
+  document.querySelectorAll("#nav button").forEach((b) => {
+    const word = b.dataset.view === "settings" ? "Settings" : b.textContent.trim();
+    b.setAttribute("aria-label", word);
+    b.innerHTML = '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">' + (NAV_ICONS[b.dataset.view] || "") + "</svg>"
+      + '<span class="nav-word">' + b.innerHTML + "</span>";
+  });
   document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click",
     () => (REMOTE ? command({ view: b.dataset.view }) : show(b.dataset.view))));
   let rescueUntil = 0;
@@ -1469,8 +1494,8 @@
   // silent when the alarm is cancelled. While the alarm clock rings, the volume
   // is the alarm clock's.
   let alarmSound = null;   // the timer repeating it
-  function soundAlarm() {
-    const a = cfg.alarm, sound = a.sound === "beep" ? { notes: CAMERA_BEEP, every: 1.5 } : SOUNDS[a.sound];
+  function soundAlarm(how) {   // how: cfg.alarm, or another with the same sound, sound_seconds and volume (cfg.printer)
+    const a = how || cfg.alarm, sound = a.sound === "beep" ? { notes: CAMERA_BEEP, every: 1.5 } : SOUNDS[a.sound];
     quietAlarm();
     if (!sound) return;
     const own = a.volume >= 0 && !ringing;
@@ -1691,6 +1716,138 @@
   $("shot-prev").addEventListener("click", () => showShot(shot.idx - 1));
   $("shot-next").addEventListener("click", () => showShot(shot.idx + 1));
   $("shot-close").addEventListener("click", closeShot);
+
+  // --- the printer -------------------------------------------------------------
+  // The app keeps up with a Bambu Lab printer's reports (Printer in the app) and
+  // passes each on: a line on the clock while it prints, its own page, and a
+  // notice when a print ends. Its camera's pictures come from "/printer/camera.jpg".
+  const PRINT_WORDS = { IDLE: "idle", PREPARE: "preparing", RUNNING: "printing", PAUSE: "paused",
+    FINISH: "finished", FAILED: "failed", SLICING: "slicing" };
+  const SPEEDS = ["Silent", "Standard", "Sport", "Ludicrous"];
+  const PRINTER_PICTURE_MS = 3000;   // the printer page asks for a new picture this often
+  let printerNow = { online: false };   // its last report
+  let printerWas = "";                  // the job's state before it, to see a print end
+  let printerTimer = null;
+  const printing = (s) => /^(PREPARE|RUNNING|PAUSE)$/.test(s.gcode_state || "");
+  const hoursMinutes = (minutes) => Math.floor(minutes / 60) + ":" + pad(minutes % 60);
+  const jobName = (s) => (s.subtask_name || "").replace(/(\.gcode)?\.3mf$|\.gcode$/i, "");
+
+  function onPrinter(state) {
+    const before = printerWas;
+    printerNow = state || { online: false };
+    if (printerNow.gcode_state) printerWas = printerNow.gcode_state;
+    if (/^(PREPARE|RUNNING|PAUSE)$/.test(before) && /^(FINISH|FAILED)$/.test(printerNow.gcode_state || "")) printerNotice(printerNow);
+    $("clock-print").textContent = printLine(printerNow);
+    renderPrinter();
+  }
+
+  // "Printer · 64 % · 0:38 left" while it prints; nothing otherwise.
+  function printLine(s) {
+    if (!cfg.printer.host || !s.online || !printing(s)) return "";
+    return cfg.printer.name + " \u00B7 " + (s.gcode_state === "RUNNING" ? (s.mc_percent || 0) + " %" : PRINT_WORDS[s.gcode_state])
+      + (s.mc_remaining_time > 0 ? " \u00B7 " + hoursMinutes(s.mc_remaining_time) + " left" : "");
+  }
+
+  function renderPrinter() {
+    if (view !== "printer") return;
+    const s = printerNow, told = s.at ? new Date(s.at) : null;
+    $("pr-title").textContent = cfg.printer.name + " \u00B7 " + (!s.online ? "not reachable" : PRINT_WORDS[s.gcode_state] || "waiting for word")
+      + (told && s.online ? " \u00B7 told at " + pad(told.getHours()) + ":" + pad(told.getMinutes()) + ":" + pad(told.getSeconds()) : "");
+    const facts = $("pr-facts");
+    facts.textContent = "";
+    const fact = (label, value, below, before) => {   // below: a bar under the row; before: a mark ahead of the value
+      if (value == null || value === "") return;
+      const row = el("div", "pr-fact"), shown = el("span", "pr-value");
+      if (before) shown.appendChild(before);
+      shown.append(value);
+      row.append(el("span", "pr-label", label), shown);
+      if (below) row.appendChild(below);
+      facts.appendChild(row);
+    };
+    if (!s.online) return;
+    fact("Job", jobName(s));
+    if (printing(s) || s.gcode_state === "FINISH") {
+      const bar = el("div", "pr-bar");
+      bar.appendChild(el("div")).style.width = Math.max(0, Math.min(100, s.mc_percent || 0)) + "%";
+      fact("Progress", (s.mc_percent || 0) + " %", bar);
+      if (s.total_layer_num) fact("Layer", s.layer_num + " / " + s.total_layer_num);
+    }
+    if (printing(s) && s.mc_remaining_time > 0) {
+      const end = new Date(Date.now() + s.mc_remaining_time * 60000);
+      fact("Time left", hoursMinutes(s.mc_remaining_time) + " \u00B7 done at " + pad(end.getHours()) + ":" + pad(end.getMinutes()));
+    }
+    const heat = (now, target) => (now == null ? null : Math.round(now) + "\u00B0" + (target > 0 ? " \u2192 " + Math.round(target) + "\u00B0" : ""));
+    fact("Nozzle", heat(s.nozzle_temper, s.nozzle_target_temper));
+    fact("Bed", heat(s.bed_temper, s.bed_target_temper));
+    if (printing(s)) fact("Speed", SPEEDS[s.spd_lvl - 1]);
+    const tray = filament(s);
+    if (tray) {
+      const swatch = el("span", "pr-swatch");
+      swatch.style.background = /^[0-9A-F]{6}/i.test(tray.tray_color || "") ? "#" + tray.tray_color.slice(0, 6) : "transparent";
+      fact("Filament", [tray.tray_type, tray.tray_sub_brands].filter(Boolean).join(" \u00B7 "), null, swatch);
+    }
+    if (s.print_error) fact("Error", "code " + Number(s.print_error).toString(16).toUpperCase() + ": see the printer's screen");
+    if (s.hms && s.hms.length) fact("Messages", s.hms.length + " on the printer's screen");
+  }
+
+  // The spool in use: the AMS slot it feeds from, or the one hung on the side.
+  function filament(s) {
+    const ams = s.ams || {}, now = +ams.tray_now;
+    let found = null;
+    (ams.ams || []).forEach((unit) => (unit.tray || []).forEach((tray) => {
+      if (+unit.id * 4 + +tray.id === now) found = tray;
+    }));
+    found = found || s.vt_tray;
+    return found && found.tray_type ? found : null;
+  }
+
+  function openPrinter() {
+    renderPrinter();
+    nextPrinterPicture();
+  }
+
+  // The camera's pictures, one after another, while the page is open: the next is asked for once one has come.
+  function nextPrinterPicture() {
+    clearTimeout(printerTimer);
+    if (view !== "printer") return;
+    const next = new Image();
+    next.onload = () => {
+      if (view !== "printer") return;
+      $("pr-cam").src = next.src;
+      $("pr-cam").hidden = false;
+      printerTimer = setTimeout(nextPrinterPicture, PRINTER_PICTURE_MS);
+    };
+    next.onerror = () => { printerTimer = setTimeout(nextPrinterPicture, PRINTER_PICTURE_MS * 2); };
+    next.src = "/printer/camera.jpg?t=" + Date.now();
+  }
+
+  function closePrinter() {
+    clearTimeout(printerTimer);
+    $("pr-cam").hidden = true;
+    $("pr-cam").removeAttribute("src");
+  }
+
+  // A print has ended: a notice over whatever shows, with the camera's picture and the printer's sound.
+  function printerNotice(s) {
+    if (REMOTE || !cfg.printer.notify) return;
+    const failed = s.gcode_state === "FAILED", when = new Date();
+    $("done-tag").textContent = failed ? "Print failed" : "Print finished";
+    $("done-tag").classList.toggle("good", !failed);
+    $("done-caption").textContent = [cfg.printer.name, jobName(s), pad(when.getHours()) + ":" + pad(when.getMinutes())].filter(Boolean).join(" \u00B7 ");
+    $("done-img").hidden = false;
+    $("done-img").src = "/printer/camera.jpg?t=" + Date.now();
+    $("done").hidden = false;
+    soundAlarm(cfg.printer);
+    updateMode();
+  }
+
+  $("done-img").addEventListener("error", () => { $("done-img").hidden = true; });
+  $("done-close").addEventListener("click", () => {
+    $("done").hidden = true;
+    $("done-img").removeAttribute("src");
+    quietAlarm();
+    updateMode();
+  });
 
   // --- alarm clock -------------------------------------------------------------
   // An alarm rings its sound in rounds: for its `seconds`, a pause, and so on
@@ -1927,6 +2084,8 @@
       + "on the tablet, with the master PIN. Forgotten it? Run reset-master.bat on the PC, with the cable in.",
     News: "Everything on the News page comes from free services on the internet. Only what is switched on here is "
       + "fetched; if more is on than fits, the page scrolls. \u25B2 and \u25BC move a block up or down.",
+    Printer: "A Bambu Lab printer (A1, P1) on the home network. The app only reads what it is doing and its camera's "
+      + "pictures; it never sends it anything that changes it. Address and LAN access code are on the printer: Settings, WLAN.",
     "Alarm clock": "Music, videos and pictures come from the media folder on the PC: run sync-media.bat. "
       + "A YouTube link is played when given; a picture is shown while the sound rings. "
       + "Music or a video plays the given number of times, for at most the given seconds in all. "
@@ -2025,6 +2184,16 @@
         { wide: true, items: READ_BLOCKS.map((one) => [one[0], one[1], "news." + one[0]]) }],
       ["news.holiday", "Next public holiday (under the prices)", "checkbox"],
       ["views.back.news", "Back to the clock after, s (0 or empty = never)", "number", number],
+    ]],
+    ["Printer", [
+      ["printer.name", "Name", "text"],
+      ["printer.host", "Address (empty = no printer)", "text"],
+      ["printer.code", "LAN access code (on the printer: Settings, WLAN)", "password"],
+      ["printer.notify", "Show when a print finishes or fails", "checkbox"],
+      ["printer.sound", "Sound then", [["none", "None"], ["beep", "Short beep"]].concat(SOUND_NAMES)],
+      ["printer.sound_seconds", "\u2026plays for, s", "number", number],
+      ["printer.volume", "\u2026volume, % of the loudest (empty = as the tablet is set)", "number", percent],
+      ["views.back.printer", "Printer page: back to the clock after, s (0 or empty = never)", "number", number],
     ]],
     ["Alarm clock", [0, 1, 2, 3].reduce((rows, i) => rows.concat([
       ["", "Alarm " + (i + 1), "group", null, { describe: () => alarmSummary(i) }],
@@ -2321,6 +2490,7 @@
       alarm: alarm.open, alarmText: alarm.open ? $("alarm-caption").textContent : "",
       offline: cfg.cameras.filter((cam, i) => cam.host && cameraState[i] && !cameraState[i].online).map((cam) => cam.name),
       weather: Array.from($("clock-wx").children).map((part) => part.textContent.trim()).join(" "),
+      printer: printLine(printerNow), printerOn: !!cfg.printer.host,
       lux: native.lux ? Math.round(native.lux()) : -1, locale: cfg.locale, build: BUILD,
     });
     if (state !== reported) native.report(reported = state);
@@ -2416,7 +2586,13 @@
     root.setProperty("--night", cfg.night.color);
     root.setProperty("--day", cfg.day.color);
     root.setProperty("--night-dim", cfg.night.dim > 0 ? cfg.night.dim : 1);   // never invisible
-    native.configure(JSON.stringify(cfg));   // the native side starts listening to the cameras
+    native.configure(JSON.stringify(cfg));   // the native side starts listening to the cameras, and to the printer
+    $("nav").querySelector('[data-view="printer"]').hidden = !cfg.printer.host;
+    if (native.printerState) {
+      const ask = () => native.printerState().then(onPrinter).catch(() => { /* no word: it stays as it was */ });
+      ask();
+      if (!window.Android) setInterval(ask, 3000);
+    }
     if (view === "settings") fillSettings();
     buildCameras();
     renderClock(true);

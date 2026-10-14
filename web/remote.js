@@ -136,6 +136,8 @@
     const state = $("state");
     state.textContent = "";
     state.append("Showing ", el("b", "", tablet.view), " · " + (tablet.night ? "night" : "day"));
+    if (tablet.printer) state.append(" · " + tablet.printer);
+    document.querySelector('#pad [data-view="printer"]').hidden = $("open-printer").hidden = !tablet.printerOn;
     (tablet.offline || []).forEach((camera) => state.append(" · ", el("span", "bad", camera + " offline")));
     if (tablet.snoozed && !tablet.ringing) state.append(" · alarm snoozed");
 
@@ -151,6 +153,65 @@
   $("stop").addEventListener("click", () => send({ stop: true }));
   $("snooze").addEventListener("click", () => send({ snooze: true }));
   $("open-settings").addEventListener("click", () => { location.href = "settings"; });
+
+  // --- the printer: what it is doing, and its camera's picture, both asked again every few seconds ---
+  const PRINTER_MS = 3000;
+  const PRINT_WORDS = { IDLE: "idle", PREPARE: "preparing", RUNNING: "printing", PAUSE: "paused", FINISH: "finished", FAILED: "failed", SLICING: "slicing" };
+  let printerTimer = null;
+  let printerPicture = "";
+
+  function openPrinter() {
+    $("handset").hidden = true;
+    $("printer").hidden = false;
+    $("printer-facts").textContent = "Asking the wall clock";
+    lookAtPrinter();
+  }
+
+  async function lookAtPrinter() {
+    clearTimeout(printerTimer);
+    if ($("printer").hidden) return;
+    const reply = await call("/api/printer");
+    if ($("printer").hidden) return;
+    if (reply) {
+      const s = await reply.json(), lines = [];
+      const hm = (minutes) => Math.floor(minutes / 60) + ":" + pad(minutes % 60);
+      const heat = (now, target) => Math.round(now) + "\u00B0" + (target > 0 ? " \u2192 " + Math.round(target) + "\u00B0" : "");
+      $("printer-state").textContent = !s.online ? "not reachable" : PRINT_WORDS[s.gcode_state] || "";
+      if (s.online) {
+        if (s.subtask_name) lines.push("Job: " + s.subtask_name.replace(/(\.gcode)?\.3mf$|\.gcode$/i, ""));
+        if (/^(PREPARE|RUNNING|PAUSE|FINISH)$/.test(s.gcode_state || "")) {
+          lines.push("Progress: " + (s.mc_percent || 0) + " %" + (s.total_layer_num ? " · layer " + s.layer_num + " / " + s.total_layer_num : ""));
+        }
+        if (/^(PREPARE|RUNNING|PAUSE)$/.test(s.gcode_state || "") && s.mc_remaining_time > 0) lines.push("Time left: " + hm(s.mc_remaining_time));
+        if (s.nozzle_temper != null) lines.push("Nozzle " + heat(s.nozzle_temper, s.nozzle_target_temper) + " · bed " + heat(s.bed_temper, s.bed_target_temper));
+        if (s.print_error) lines.push("Error code " + Number(s.print_error).toString(16).toUpperCase() + ": see the printer's screen");
+        if (s.hms && s.hms.length) lines.push(s.hms.length + " message(s) on the printer's screen");
+      }
+      $("printer-facts").textContent = lines.join("\n") || (s.online ? "" : "The wall clock has no word from the printer.");
+    }
+    try {   // the picture: fetched with the session, as the alarm pictures are
+      const picture = await fetch("/api/printer/camera", { headers: signedAs() });
+      if (picture.ok && !$("printer").hidden) {
+        const url = URL.createObjectURL(await picture.blob());
+        $("printer-cam").src = url;
+        if (printerPicture) URL.revokeObjectURL(printerPicture);
+        printerPicture = url;
+      }
+    } catch (e) { /* the next round may do better */ }
+    printerTimer = setTimeout(lookAtPrinter, PRINTER_MS);
+  }
+
+  function closePrinter() {
+    clearTimeout(printerTimer);
+    $("printer").hidden = true;
+    $("handset").hidden = false;
+    $("printer-cam").removeAttribute("src");
+    if (printerPicture) URL.revokeObjectURL(printerPicture);
+    printerPicture = "";
+  }
+
+  $("open-printer").addEventListener("click", openPrinter);
+  $("printer-back").addEventListener("click", closePrinter);
 
   // --- the list of camera alarms ---------------------------------------------------
   // The pictures are the cameras' own, copied to the tablet. Each is fetched with the name and PIN, a few at a time.

@@ -53,6 +53,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private Cameras cameras;
+    private Printer printer;
     private volatile Remote remote;
     private volatile float lux = -1f;   // room light from the sensor; below 0 = not known
     private volatile String pageState = "{}";   // what the page says it is doing, for the remote page
@@ -99,7 +100,8 @@ public class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
 
         cameras = new Cameras(this::runInPage, new File(getFilesDir(), "alarms"));
-        web.setWebViewClient(new PageClient(getAssets(), cameras, slides(), media(), this::pageDied));
+        printer = new Printer(this::runInPage);
+        web.setWebViewClient(new PageClient(getAssets(), cameras, printer, slides(), media(), this::pageDied));
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(web);
         web.loadUrl(view == null ? PAGE : PAGE + "?view=" + view);
@@ -170,6 +172,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         new Thread(cameras::stop).start();   // closing sockets is not allowed on the main thread
+        printer.stop();
         new Thread(remote::close).start();
         web.destroy();
         super.onDestroy();
@@ -313,6 +316,8 @@ public class MainActivity extends Activity {
                 JSONObject config = saved().put("camera_password", "").put("remote_pin", "");
                 JSONObject remote = config.optJSONObject("remote");
                 if (remote != null) remote.put("master", "");
+                JSONObject printer = config.optJSONObject("printer");
+                if (printer != null) printer.put("code", "");
                 JSONArray users = users(config);
                 for (int i = 0; i < users.length(); i++) {
                     JSONObject user = users.optJSONObject(i);
@@ -335,6 +340,8 @@ public class MainActivity extends Activity {
             try {
                 JSONObject next = new JSONObject(json), current = saved();
                 if (next.optString("camera_password").isEmpty()) next.put("camera_password", current.optString("camera_password"));
+                JSONObject printer = next.optJSONObject("printer"), had = current.optJSONObject("printer");
+                if (printer != null && printer.optString("code").isEmpty() && had != null) printer.put("code", had.optString("code"));
                 next.remove("remote");
                 if (current.has("remote")) next.put("remote", current.get("remote"));
                 next.put("remote_pin", current.optString("remote_pin"));
@@ -343,6 +350,16 @@ public class MainActivity extends Activity {
             } catch (JSONException rejected) {
                 // not settings: ignore
             }
+        }
+
+        @Override
+        public String printer() {
+            return printer.state();
+        }
+
+        @Override
+        public byte[] printerPicture() {
+            return printer.picture();
         }
 
         /** The camera alarms of the last day, from the tablet's copies of the cameras' own pictures. */
@@ -428,6 +445,13 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void configure(String json) {
             cameras.configure(json);
+            printer.configure(json);
+        }
+
+        /** What the printer is doing, as JSON (see Printer.state). */
+        @JavascriptInterface
+        public String printerState() {
+            return printer.state();
         }
 
         /** Backlight from 0 to 1; below 0 hands it back to Android. */

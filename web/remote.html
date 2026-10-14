@@ -44,12 +44,14 @@
       <button type="button" class="key" data-view="weather">Weather</button>
       <button type="button" class="key" data-view="news">News</button>
       <button type="button" class="key" data-view="slides">Slides</button>
+      <button type="button" class="key" data-view="printer" hidden>Printer</button>
     </div>
 
     <div class="groove"></div>
 
     <div class="row">
       <button type="button" class="key key-blue" id="open-events">Event list</button>
+      <button type="button" class="key" id="open-printer" hidden>Printer</button>
       <button type="button" class="key" id="open-settings">Settings</button>
     </div>
 
@@ -67,6 +69,15 @@
   </header>
   <p class="events-note" id="events-note"></p>
   <div id="events-list"></div>
+</section>
+
+<section class="events" id="printer" hidden>
+  <header class="events-head">
+    <button type="button" class="key" id="printer-back">&#8249; Remote</button>
+    <h1>Printer <span id="printer-state"></span></h1>
+  </header>
+  <img class="printer-cam" id="printer-cam" alt="">
+  <p class="printer-facts" id="printer-facts"></p>
 </section>
 
 <div class="lightbox" id="lightbox" hidden>

@@ -40,6 +40,11 @@ Amcrest/Dahua cameras ──alarms, snapshots, live video──> tablet (Wall Cl
   from that camera appear over whatever is showing, with a sound of your choice
   (or none), for as long and as loud as you set. Upright, the camera also plays
   live underneath.
+- **Printer** — a Bambu Lab printer (A1, P1) on the home network: a line on
+  the clock while it prints (progress, time left), a page with its camera's
+  picture, temperatures, layer and filament, and a notice with a sound when a
+  print finishes or fails. Read only, over the printer's own local connection
+  with its LAN access code; no Bambu account.
 - **Alarm clock** — four alarms, daily, on weekdays, at weekends or just once;
   each rings a sound of its own choice or plays a YouTube link, music or a video
   from the tablet, or shows a picture. Snooze and Stop.

@@ -92,6 +92,8 @@ body.night .seg.on.rest { opacity: 0.3; }
 .wxline .emoji { font-size: 6vh; }
 .wxline .temp { font-weight: 500; }
 .wxline .range { opacity: var(--soft); letter-spacing: 0.06em; }
+.printline { margin-top: 2.4vh; font-size: 3.2vh; letter-spacing: 0.16em; text-transform: uppercase; opacity: var(--soft); }
+.printline:empty { display: none; }
 
 /* --- small time + date header (camera and weather views) ---------------- */
 .head { display: flex; align-items: center; gap: 4vw; padding-bottom: 3vh; }
@@ -191,7 +193,8 @@ body.night .seg.on.rest { opacity: 0.3; }
   padding: 0.8vh;
   border: 1px solid color-mix(in srgb, var(--fg) 45%, transparent);
   border-radius: 99vh;
-  background: rgba(0, 0, 0, 0.86);
+  background: rgba(36, 38, 46, 0.94);   /* dark, but set off from the black page behind it */
+  box-shadow: 0 0.8vh 3vh rgba(0, 0, 0, 0.7);
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, 40%);
@@ -211,6 +214,8 @@ body.night .seg.on.rest { opacity: 0.3; }
   padding: 2.4vh 2.5vw;
 }
 .nav button.active { background: var(--fg); color: #000; }
+.nav button[hidden] { display: none !important; }   /* the Printer button, with no printer set */
+.nav-icon { display: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* --- link / camera trouble -------------------------------------------- */
 .status {
@@ -439,6 +444,23 @@ body.night .up, body.night .down { color: inherit; }   /* no bright colours at n
 #shot-next { right: 0; text-align: right; padding-right: 3vw; }
 
 /* a video of an alarm, full screen: the player's own buttons are along the bottom, so Close is at the top */
+/* the printer: its camera's picture beside what it is doing (picture never dimmed at night) */
+#view-printer { padding: 4vh 4vw 0; opacity: 1; }
+#view-printer .head, .pr-facts { opacity: var(--dim); }
+.printer { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; display: grid; grid-template-columns: minmax(0, 58fr) minmax(0, 42fr); gap: 4vw; align-items: start; padding: 3vh 0 16vh; }
+.pr-cam { width: 100%; aspect-ratio: 1536 / 1080; object-fit: contain; background: #111; border-radius: 1vh; }
+.pr-cam[hidden] { display: block; visibility: hidden; }
+.pr-facts { display: grid; gap: 1.6vh; }
+.pr-fact { display: grid; grid-template-columns: 14vw 1fr; align-items: center; gap: 1vw; padding-bottom: 1.2vh; border-bottom: 1px solid var(--rule); }
+.pr-label { font-size: 2.2vh; letter-spacing: 0.16em; text-transform: uppercase; opacity: var(--soft); }
+.pr-value { display: flex; align-items: center; gap: 1.2vw; min-width: 0; font-size: 3.4vh; }
+.pr-bar { grid-column: 1 / -1; height: 0.8vh; border-radius: 1vh; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+.pr-bar div { height: 100%; background: var(--fg); }
+.pr-swatch { flex: none; width: 3vh; height: 3vh; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.4); }
+.done-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.done-img[hidden] { display: none; }
+.alarm-tag.good { background: #2e9d5b; }
+
 #clip-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 #clip-video[hidden] { display: none; }
 .clip-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 12vw; font-size: 3.4vh; text-align: center; opacity: 0.8; }
@@ -524,6 +546,9 @@ body.remote .settings-actions { flex-wrap: wrap; }
 @media (max-width: 700px) {
   body.remote .settings fieldset, body.remote .settings fieldset.three { grid-template-columns: 1fr; }
   body.remote .nav button { font-size: 0.75rem; letter-spacing: 0.04em; padding: 0.75rem 0.4rem; }
+  body.remote .nav button { display: grid; place-items: center; padding: 0.6rem 0.75rem; }
+  body.remote .nav-icon { display: block; width: 1.6rem; height: 1.6rem; }
+  body.remote .nav-word { display: none; }
 }
 
 /* settings tabs */
@@ -709,6 +734,10 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .cams { grid-template-columns: 1fr; align-content: center; }   /* cameras one above the other */
 
   .nav button { font-size: 2.6vw; letter-spacing: 0.1em; text-indent: 0.1em; padding: 1.6vh 1.3vw; }
+  /* upright the words do not fit: a large icon for each page instead */
+  .nav button { display: grid; place-items: center; padding: 1.5vh 2.1vw; }
+  .nav-icon { display: block; width: 7vw; height: 7vw; }
+  .nav-word { display: none; }
   .status { font-size: 2.6vw; }
 
   .alarm-live { top: auto; width: auto; right: 0; height: 44%; }
@@ -775,6 +804,14 @@ body.remote .settings-actions { flex-wrap: wrap; }
   .ev-what { margin: 0; font-size: 2.6vw; }
   .ev-strip { gap: 1.6vw; }
   .ev-strip img { height: 11vh; }
+  .printline { font-size: 3.6vw; margin-top: 3vh; }
+  .printer { grid-template-columns: 1fr; gap: 3vh; }
+  .pr-facts { gap: 1.1vh; }
+  .pr-fact { grid-template-columns: 26vw 1fr; padding-bottom: 0.9vh; }
+  .pr-value { gap: 2.4vw; }
+  .pr-label { font-size: 2.8vw; }
+  .pr-value { font-size: 4.4vw; }
+  .pr-swatch { width: 4.4vw; height: 4.4vw; }
   .ev-videos { grid-column: 1; margin-top: 0; gap: 1.2vh 2.4vw; }
   .ev-video { font-size: 2.8vw; padding: 1vh 4vw; }
   .clip-note { font-size: 4.4vw; }

@@ -91,6 +91,12 @@ final class Remote extends Thread {
         /** The camera alarms of the last day, as JSON (see Cameras.alarms). */
         String alarms();
 
+        /** What the printer is doing, as JSON (see Printer.state). */
+        String printer();
+
+        /** The printer camera's latest picture, as JPEG bytes; null when there is none. */
+        byte[] printerPicture();
+
         /** One of the tablet's copies of the cameras' alarm pictures, small or in full, as JPEG bytes; null when there is none. */
         byte[] shot(String file, boolean small);
 
@@ -255,6 +261,12 @@ final class Remote extends Thread {
             json(out, host.media());
         } else if (path.equals("/api/folders")) {
             json(out, host.slideFolders());
+        } else if (path.equals("/api/printer")) {
+            json(out, host.printer());
+        } else if (path.equals("/api/printer/camera")) {
+            byte[] picture = host.printerPicture();
+            if (picture == null) send(out, 404, "text/plain", new byte[0]);
+            else send(out, 200, "image/jpeg", picture);
         } else if (path.equals("/api/events")) {
             json(out, host.alarms());
         } else if (path.equals("/api/shot")) {   // ?size=thumb or full&file=...: one picture of an alarm

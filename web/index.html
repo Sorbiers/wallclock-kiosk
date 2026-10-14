@@ -14,6 +14,7 @@
   <div class="digits" id="clock-digits"></div>
   <div class="dateline" id="clock-date"></div>
   <div class="wxline" id="clock-wx"></div>
+  <div class="printline" id="clock-print"></div>
 </main>
 
 <main id="view-camera" class="view" hidden>
@@ -34,6 +35,20 @@
   </header>
   <div class="ev-list" id="ev-list"></div>
   <div class="ev-empty" id="ev-empty" hidden>No camera alarms in the last 24 hours.</div>
+</main>
+
+<main id="view-printer" class="view" hidden>
+  <header class="head">
+    <div class="digits" id="pr-digits"></div>
+    <div class="headtext">
+      <div class="dateline" id="pr-date"></div>
+      <div class="ev-title" id="pr-title"></div>
+    </div>
+  </header>
+  <div class="printer">
+    <img class="pr-cam" id="pr-cam" alt="" hidden>
+    <div class="pr-facts" id="pr-facts"></div>
+  </div>
 </main>
 
 <main id="view-weather" class="view" hidden>
@@ -103,6 +118,7 @@
   <button type="button" data-view="weather">Weather</button>
   <button type="button" data-view="news">News</button>
   <button type="button" data-view="slides">Slides</button>
+  <button type="button" data-view="printer" hidden>Printer</button>
   <button type="button" data-view="settings" aria-label="Settings">&#9881;</button>
 </nav>
 
@@ -149,6 +165,12 @@
     <div class="pin-note" id="pin-note"></div>
     <div class="pin-keys"><button type="button" id="pin-cancel">Cancel</button><button type="submit">OK</button></div>
   </form>
+</div>
+
+<div id="done" class="shot" hidden>
+  <img id="done-img" class="done-img" alt="">
+  <div class="alarm-top"><span class="alarm-tag" id="done-tag"></span><span id="done-caption"></span></div>
+  <button type="button" id="done-close" class="alarm-cancel">Close</button>
 </div>
 
 <div id="clip" class="shot" hidden>

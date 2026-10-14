@@ -88,6 +88,14 @@ public final class RemoteTest {
             return "test secret";
         }
 
+        public String printer() {
+            return "{\"online\":true,\"gcode_state\":\"RUNNING\"}";
+        }
+
+        public byte[] printerPicture() {
+            return PICTURE;
+        }
+
         public void log(String message) {
         }
     }
@@ -174,6 +182,9 @@ public final class RemoteTest {
                 && host.saved.isEmpty() && post(port, "/api/config", null, "246810", "{\"x\":1}").status == 200
                 && host.saved.equals("{\"x\":1}"));
         check("the alarm list is handed on", get(port, "/api/events", null, "246810").text().contains("Driveway"));
+        check("the printer's state and picture are handed on, with the PIN only", get(port, "/api/printer", null, "246810").text().contains("RUNNING")
+                && Arrays.equals(get(port, "/api/printer/camera", null, "246810").body, PICTURE)
+                && get(port, "/api/printer", null, null).status == 401 && get(port, "/api/printer/camera", null, null).status == 401);
         check("the slide folders are handed on, with the PIN only", get(port, "/api/folders", null, "246810").text().equals("[\"night\"]")
                 && get(port, "/api/folders", null, null).status == 401);
         String file = "1791654912000_0_CrossLineDetection%2BCrossRegionDetection_0A1B2C3D4E5F.jpg";
